@@ -1,0 +1,37 @@
+name: 功能建议
+description: 建议新功能或新平台接入
+title: 'feat: '
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎提功能建议。新平台接入请先阅读 docs/DEVELOPMENT.md 中的「新增平台」清单。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 背景与动机
+      description: 这个功能解决什么问题?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 方案描述
+      description: 期望的接口/行为 (工具名、参数、返回结构)
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 备选方案
+      description: 考虑过的其它实现方式
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: API 文档链接、响应样本等
+    validations:
+      required: false
