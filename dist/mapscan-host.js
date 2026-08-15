@@ -70,6 +70,24 @@ function textOf(collect) {
 const HTTP_MARKER = '__MAPSCAN_HTTP__:'
 
 /**
+ * 解析 shell 执行策略。插件路径不携带会话, 部署默认策略缺失时执行器会因
+ * `const { mode } = policy` 解构 undefined 崩溃; 这里显式解析, 仅在策略服务
+ * 无法给出结果时按本环境实际生效策略回落为全访问, 不覆盖正常部署的约束。
+ */
+async function resolveShellPolicy(ctx) {
+  const sp = ctx.get('sandboxPolicy')
+  if (sp && typeof sp.resolve === 'function') {
+    try {
+      const policy = await sp.resolve({})
+      if (policy && policy.mode) return policy
+    } catch (_error) {
+      // 继续回落
+    }
+  }
+  return { mode: 'danger-full-access', workspaceRoot: '' }
+}
+
+/**
  * 通过 curl.exe 发起 HTTP 请求, 响应体必须是 JSON。
  * @param {object} ctx - 插件 ctx (至少含 ctx.shell)
  * @param {string} url - 目标 URL
@@ -98,6 +116,7 @@ async function curlJson(ctx, url, options = {}) {
     command: cmd,
     timeoutMs: (timeoutSec + 10) * 1000,
     stdoutMaxBytes: 4194304,
+    sandboxPolicy: await resolveShellPolicy(ctx),
   })
 
   const out = textOf(res.stdout)

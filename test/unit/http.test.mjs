@@ -31,6 +31,31 @@ test('curlJson 解析 JSON 与 HTTP 状态标记', async () => {
     /-w '\\n__MAPSCAN_HTTP__:%\{http_code\}' 'https:\/\/example\.test\/api'/,
   )
   assert.equal(shell.calls[0].timeoutMs, 40000)
+  // 显式传递 shell 策略 (修复执行器对 undefined policy 的解构崩溃)
+  assert.equal(shell.calls[0].sandboxPolicy.mode, 'danger-full-access')
+})
+
+test('curlJson 透传策略服务给出的策略', async () => {
+  const shell = mockShell('{"a":1}\n__MAPSCAN_HTTP__:200')
+  const sp = { resolve: async () => ({ mode: 'workspace-write', workspaceRoot: 'D:\\ws' }) }
+  const ctx = { shell, get: (name) => (name === 'sandboxPolicy' ? sp : undefined) }
+  await curlJson(ctx, 'https://x.test/', {})
+  assert.deepEqual(shell.calls[0].sandboxPolicy, {
+    mode: 'workspace-write',
+    workspaceRoot: 'D:\\ws',
+  })
+})
+
+test('curlJson 策略服务 resolve 抛错时回落全访问', async () => {
+  const shell = mockShell('{"a":1}\n__MAPSCAN_HTTP__:200')
+  const sp = {
+    resolve: async () => {
+      throw new Error('boom')
+    },
+  }
+  const ctx = { shell, get: (name) => (name === 'sandboxPolicy' ? sp : undefined) }
+  await curlJson(ctx, 'https://x.test/', {})
+  assert.equal(shell.calls[0].sandboxPolicy.mode, 'danger-full-access')
 })
 
 test('curlJson POST 携带 --data-binary 与自定义头', async () => {

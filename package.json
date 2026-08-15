@@ -1,6 +1,6 @@
 {
   "name": "mapscan-dsh",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "DeepSeek Harness 动态 Cordis 插件：FOFA / Shodan / 鹰图Hunter / ZoomEye / Quake 网络空间测绘综合查询",
   "type": "module",
   "license": "MIT",
