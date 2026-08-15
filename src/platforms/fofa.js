@@ -3,6 +3,7 @@
  * API 契约: https://fofa.info/api (search/all, search/stats, host/{ip}, info/my)
  * @module src/platforms/fofa
  */
+import { fofaErrMsg } from '../lib/errors.js'
 import { MAX_BANNER, clampInt, clean, trunc } from '../lib/utils.js'
 import { fetchJson } from '../lib/http.js'
 
@@ -26,7 +27,7 @@ export async function searchFofa(ctx, args, key) {
   if (args.full === true) url += '&full=true'
   const { data } = await fetchJson(ctx, url, { timeoutSec: 45 })
   if (!data || data.error) {
-    throw new Error(`FOFA 返回错误: ${(data && data.errmsg) || '未知错误'}`)
+    throw new Error(fofaErrMsg(data))
   }
   const fl = fields.split(',').map((s) => s.trim())
   const rows = Array.isArray(data.results) ? data.results : []
@@ -84,7 +85,7 @@ export async function detailFofa(ctx, ip, key) {
   const url = `${FOFA_BASE}/host/${encodeURIComponent(ip)}?key=${encodeURIComponent(key)}&detail=true`
   const { data } = await fetchJson(ctx, url, { timeoutSec: 30 })
   if (!data || data.error) {
-    throw new Error(`FOFA 返回错误: ${(data && data.errmsg) || '未知错误'}`)
+    throw new Error(fofaErrMsg(data))
   }
   return clean({
     platform: 'fofa',
@@ -112,7 +113,7 @@ export async function statsFofa(ctx, args, key) {
     `&fields=${encodeURIComponent(fields)}&size=${size}`
   const { data } = await fetchJson(ctx, url, { timeoutSec: 45 })
   if (!data || data.error) {
-    throw new Error(`FOFA 返回错误: ${(data && data.errmsg) || '未知错误'}`)
+    throw new Error(fofaErrMsg(data))
   }
   return {
     platform: 'fofa',
@@ -128,7 +129,7 @@ export async function accountFofa(ctx, key) {
     timeoutSec: 30,
   })
   if (!data || data.error) {
-    throw new Error(`FOFA 返回错误: ${(data && data.errmsg) || '未知错误'}`)
+    throw new Error(fofaErrMsg(data))
   }
   return clean({
     platform: 'fofa',

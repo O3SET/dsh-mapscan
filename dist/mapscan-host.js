@@ -284,6 +284,80 @@ async function setKeys(ctx, args) {
 }
 
 
+// ---- src/lib/errors.js ----
+/**
+ * 平台常见错误码 -> 中文提示 (只收录已核实/公开文档确认的码)。
+ * @module src/lib/errors
+ */
+
+const FOFA_HINTS = {
+  '-2': '账号无权限或会员过期, 请到 fofa.info 个人中心核对',
+  '-12': '账号扣费异常/欠费, 请检查余额',
+  '-15': '查询语句解析失败, 请检查语法',
+  '-700': '账号无效或 Key 错误, 请到 fofa.info 个人中心核对',
+}
+
+const HUNTER_HINTS = {
+  400: '查询参数错误, 请检查语法与参数',
+  401: '令牌过期或无效, 请到 hunter.qianxin.com 个人中心重新生成',
+  403: '无权访问该接口, 请检查账户权限',
+}
+
+/** FOFA errmsg -> 带提示的错误信息 (errmsg 形如 "[-700] 账号无效") */
+function fofaErrMsg(data) {
+  const msg = (data && data.errmsg) || '未知错误'
+  const code = /\[(-?\d+)\]/.exec(msg)
+  const hint = code && FOFA_HINTS[code[1]] ? ` — ${FOFA_HINTS[code[1]]}` : ''
+  return `FOFA 返回错误: ${msg}${hint}`
+}
+
+/** Hunter 响应 -> 带提示的错误信息 */
+function hunterErrMsg(data) {
+  const code = data && data.code
+  const msg = (data && (data.message || data.msg)) || '未知错误'
+  const hint = code !== undefined && HUNTER_HINTS[code] ? ` — ${HUNTER_HINTS[code]}` : ''
+  return `Hunter 返回错误 code=${code}: ${msg}${hint}`
+}
+
+
+// ---- src/lib/summary.js ----
+/**
+ * 搜索结果聚合摘要 — 供模型快速解读大批量结果 (唯一 IP / Top 端口 / Top 产品 / Top 国家)。
+ * @module src/lib/summary
+ */
+
+function topN(map, n) {
+  return [...map.entries()]
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+    .slice(0, n)
+    .map(([name, count]) => ({ name, count }))
+}
+
+function bump(map, key) {
+  map.set(key, (map.get(key) || 0) + 1)
+}
+
+/** 归一化结果数组 -> 摘要统计 */
+function summarize(results) {
+  const ips = new Set()
+  const ports = new Map()
+  const products = new Map()
+  const countries = new Map()
+  for (const r of results) {
+    if (r.ip) ips.add(String(r.ip))
+    if (r.port !== undefined && r.port !== null) bump(ports, String(r.port))
+    if (r.product) bump(products, String(r.product))
+    if (r.country) bump(countries, String(r.country))
+  }
+  return {
+    unique_ips: ips.size,
+    top_ports: topN(ports, 10),
+    top_products: topN(products, 10),
+    top_countries: topN(countries, 10),
+  }
+}
+
+
 // ---- src/platforms/fofa.js ----
 /**
  * FOFA (fofa.info) 适配: 搜索 / IP 详情 / 聚合统计 / 账户配额。
@@ -311,7 +385,7 @@ async function searchFofa(ctx, args, key) {
   if (args.full === true) url += '&full=true'
   const { data } = await fetchJson(ctx, url, { timeoutSec: 45 })
   if (!data || data.error) {
-    throw new Error(`FOFA 返回错误: ${(data && data.errmsg) || '未知错误'}`)
+    throw new Error(fofaErrMsg(data))
   }
   const fl = fields.split(',').map((s) => s.trim())
   const rows = Array.isArray(data.results) ? data.results : []
@@ -369,7 +443,7 @@ async function detailFofa(ctx, ip, key) {
   const url = `${FOFA_BASE}/host/${encodeURIComponent(ip)}?key=${encodeURIComponent(key)}&detail=true`
   const { data } = await fetchJson(ctx, url, { timeoutSec: 30 })
   if (!data || data.error) {
-    throw new Error(`FOFA 返回错误: ${(data && data.errmsg) || '未知错误'}`)
+    throw new Error(fofaErrMsg(data))
   }
   return clean({
     platform: 'fofa',
@@ -397,7 +471,7 @@ async function statsFofa(ctx, args, key) {
     `&fields=${encodeURIComponent(fields)}&size=${size}`
   const { data } = await fetchJson(ctx, url, { timeoutSec: 45 })
   if (!data || data.error) {
-    throw new Error(`FOFA 返回错误: ${(data && data.errmsg) || '未知错误'}`)
+    throw new Error(fofaErrMsg(data))
   }
   return {
     platform: 'fofa',
@@ -413,7 +487,7 @@ async function accountFofa(ctx, key) {
     timeoutSec: 30,
   })
   if (!data || data.error) {
-    throw new Error(`FOFA 返回错误: ${(data && data.errmsg) || '未知错误'}`)
+    throw new Error(fofaErrMsg(data))
   }
   return clean({
     platform: 'fofa',
@@ -603,6 +677,32 @@ async function honeyscoreShodan(ctx, ip, key) {
   return data
 }
 
+/** dns/domain/{domain} — 子域枚举 (A/CNAME 记录, 最多取 300 条) */
+async function dnsDomainShodan(ctx, domain, key) {
+  const url = `${SHODAN_BASE}/dns/domain/${encodeURIComponent(domain)}?key=${encodeURIComponent(key)}`
+  const { data } = await fetchJson(ctx, url, { timeoutSec: 30 })
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`Shodan 返回异常: ${trunc(JSON.stringify(data), 300)}`)
+  }
+  const items = Array.isArray(data.data) ? data.data : []
+  const subdomains = items.slice(0, 300).map((s) =>
+    clean({
+      subdomain: s.subdomain,
+      type: s.type,
+      value: s.value,
+      last_seen: s.last_seen,
+    }),
+  )
+  return clean({
+    platform: 'shodan',
+    domain: data.domain || domain,
+    tags: Array.isArray(data.tags) ? data.tags : undefined,
+    count: items.length,
+    returned: subdomains.length,
+    subdomains,
+  })
+}
+
 
 // ---- src/platforms/hunter.js ----
 /**
@@ -633,9 +733,7 @@ async function searchHunter(ctx, args, key) {
   if (args.end_time) url += `&end_time=${encodeURIComponent(String(args.end_time))}`
   const { data } = await fetchJson(ctx, url, { timeoutSec: 45 })
   if (!data || data.code !== 200) {
-    throw new Error(
-      `Hunter 返回错误 code=${data && data.code}: ${trunc((data && (data.message || data.msg)) || '未知错误', 300)}`,
-    )
+    throw new Error(hunterErrMsg(data))
   }
   const d = data.data || {}
   const arr = Array.isArray(d.arr) ? d.arr : []
@@ -703,9 +801,7 @@ async function accountHunter(ctx, key) {
     `&search=${encodeURIComponent(b64)}&page=1&page_size=1`
   const { data } = await fetchJson(ctx, url, { timeoutSec: 30 })
   if (!data || data.code !== 200) {
-    throw new Error(
-      `Hunter 返回错误 code=${data && data.code}: ${trunc((data && (data.message || data.msg)) || '未知错误', 300)}`,
-    )
+    throw new Error(hunterErrMsg(data))
   }
   const d = data.data || {}
   return clean({
@@ -944,6 +1040,90 @@ const ACCOUNTERS = {
 }
 
 
+// ---- src/platforms/union.js ----
+/**
+ * 联合搜索 (map_search platform='all'): 对所有已配置 Key 的平台并行发起同一查询,
+ * 合并归一化结果并按 ip:port 去重, 附各平台报告与聚合摘要。
+ * 注意: 会消耗所有已配置平台的配额, 请谨慎使用。
+ * @module src/platforms/union
+ */
+
+/** 全平台联合搜索; args.key 不适用 (各平台 Key 独立配置) */
+async function searchUnion(ctx, args) {
+  const entries = []
+  for (const p of PLATFORMS) {
+    const key = await resolveKey(ctx, p, undefined)
+    if (key) entries.push([p, key])
+  }
+  if (entries.length === 0) {
+    throw new Error('所有平台都未配置 API Key, 无法联合搜索。请先 map_set_keys 或设置环境变量')
+  }
+
+  const page = clampInt(args.page, 1, 10000, 1)
+  const size = clampInt(args.size, 1, 100, 20)
+  const settled = await Promise.all(
+    entries.map(async ([p, key]) => {
+      try {
+        const res = await SEARCHERS[p](ctx, { ...args, page, size }, key)
+        return {
+          platform: p,
+          ok: true,
+          total: res.total,
+          returned: res.returned,
+          results: res.results,
+        }
+      } catch (error) {
+        return {
+          platform: p,
+          ok: false,
+          error: trunc(error && error.message ? error.message : String(error), 200),
+        }
+      }
+    }),
+  )
+
+  const merged = []
+  const seen = new Set()
+  let deduped = 0
+  const report = {}
+  let total = 0
+  for (const r of settled) {
+    if (r.ok) {
+      report[r.platform] = { total: r.total, returned: r.returned }
+      total += r.total || 0
+      for (const item of r.results) {
+        const key = `${item.ip || item.host || item.domain || ''}:${
+          item.port === undefined || item.port === null ? '' : item.port
+        }`
+        if (seen.has(key)) {
+          deduped += 1
+          continue
+        }
+        seen.add(key)
+        merged.push(item)
+      }
+    } else {
+      report[r.platform] = { error: r.error }
+    }
+  }
+
+  const skipped = PLATFORMS.filter((p) => !report[p])
+  return {
+    platform: 'all',
+    query: args.query,
+    page,
+    size,
+    total,
+    returned: merged.length,
+    deduped,
+    platforms: report,
+    skipped,
+    summary: summarize(merged),
+    results: merged,
+  }
+}
+
+
 // ---- src/tools/common.js ----
 /**
  * 工具定义公共件: output.render / 错误对象 / 输出 schema。
@@ -971,9 +1151,34 @@ const JSON_OUTPUT = { schema: { type: 'json' }, render: textRender }
 
 // ---- src/tools/map_search.js ----
 /**
- * map_search — 五平台统一搜索。
+ * map_search — 五平台统一搜索 + 全平台联合搜索 (platform='all') + 自动翻页。
  * @module src/tools/map_search
  */
+
+/**
+ * 单平台翻页: 从 args.page 起顺序拉取 pages 页并合并, 空页提前停止。
+ * @returns 单页结果结构 + { results(合并), returned, pages_fetched, summary }
+ */
+async function searchPaged(ctx, platform, args, key, pages) {
+  const all = []
+  let last
+  let fetched = 0
+  for (let i = 0; i < pages; i++) {
+    const res = await SEARCHERS[platform](ctx, { ...args, page: (args.page || 1) + i }, key)
+    fetched += 1
+    all.push(...res.results)
+    last = res
+    if (res.returned === 0) break
+  }
+  return {
+    ...last,
+    page: args.page || 1,
+    results: all,
+    returned: all.length,
+    pages_fetched: fetched,
+    summary: summarize(all),
+  }
+}
 
 function makeMapSearchTool(ctx) {
   return harness.defineTool({
@@ -983,19 +1188,24 @@ function makeMapSearchTool(ctx) {
       'query 使用各平台原生语法，示例——fofa: app="nginx" && country="CN"; ' +
       'shodan: nginx port:443 country:CN; hunter: ip="1.1.1.1" || web.title="后台"; ' +
       'zoomeye: app:"nginx" +country:"CN"(+为与, 空格为或); quake: port:"80" AND country:"CN"。' +
-      '返回统一格式的 ip/端口/协议/域名/标题/banner/证书/地理/组件/风险等字段；' +
+      'platform 传 "all" 时对所有已配置 Key 的平台并行联合搜索并按 ip:port 去重(消耗各平台配额)。' +
+      'pages 参数可自动翻页合并(1~5, 仅单平台生效); 结果附带 summary 聚合摘要(唯一IP/Top端口/Top产品/Top国家)。' +
       '可用 save 参数把完整结果另存为 JSON 文件。',
     parameters: {
       type: 'object',
       properties: {
         platform: {
           type: 'string',
-          enum: ['fofa', 'shodan', 'hunter', 'zoomeye', 'quake'],
-          description: '测绘平台，必填',
+          enum: ['fofa', 'shodan', 'hunter', 'zoomeye', 'quake', 'all'],
+          description: '测绘平台，必填; all=所有已配置平台联合搜索',
         },
         query: { type: 'string', description: '检索语句，使用该平台原生语法，必填' },
         page: { type: 'integer', description: '页码，从 1 开始，默认 1' },
         size: { type: 'integer', description: '每页数量，默认 20，最大 100' },
+        pages: {
+          type: 'integer',
+          description: '可选: 自动翻页数(1~5, 默认 1), 逐页合并结果; 仅单平台生效',
+        },
         fields: {
           type: 'string',
           description:
@@ -1013,7 +1223,10 @@ function makeMapSearchTool(ctx) {
         status_code: { type: 'string', description: '仅 hunter: HTTP 状态码过滤，如 200' },
         start_time: { type: 'string', description: '仅 hunter: 开始时间，如 2024-01-01' },
         end_time: { type: 'string', description: '仅 hunter: 结束时间，如 2024-12-31' },
-        key: { type: 'string', description: '可选: 临时覆盖该平台的 API Key(不保存)' },
+        key: {
+          type: 'string',
+          description: '可选: 临时覆盖该平台的 API Key(不保存); 联合搜索(all)时忽略',
+        },
         save: { type: 'string', description: '可选: 把完整结果 JSON 写入该文件路径' },
       },
       required: ['platform', 'query'],
@@ -1024,17 +1237,23 @@ function makeMapSearchTool(ctx) {
     async execute(args) {
       const platform = args.platform
       try {
-        const key = await resolveKey(ctx, platform, args.key)
-        if (!key) {
-          return {
-            ok: false,
-            platform,
-            error:
-              `未配置 ${platform} 的 API Key。请先调用 map_set_keys 保存(参数 ${platform})，` +
-              `或设置环境变量 ${PRIMARY_REFS[platform]}`,
+        let res
+        if (platform === 'all') {
+          res = await searchUnion(ctx, args)
+        } else {
+          const key = await resolveKey(ctx, platform, args.key)
+          if (!key) {
+            return {
+              ok: false,
+              platform,
+              error:
+                `未配置 ${platform} 的 API Key。请先调用 map_set_keys 保存(参数 ${platform})，` +
+                `或设置环境变量 ${PRIMARY_REFS[platform]}`,
+            }
           }
+          const pages = clampInt(args.pages, 1, 5, 1)
+          res = await searchPaged(ctx, platform, args, key, pages)
         }
-        const res = await SEARCHERS[platform](ctx, args, key)
         if (args.save) {
           const fs = ctx.get('fs')
           if (fs) {
@@ -1230,7 +1449,7 @@ function makeMapAccountTool(ctx) {
 
 // ---- src/tools/map_dns.js ----
 /**
- * map_dns — Shodan DNS 批量解析 (域名 -> IP)。
+ * map_dns — Shodan DNS: 批量解析 (hostnames) / 子域枚举 (domain)。
  * @module src/tools/map_dns
  */
 
@@ -1238,19 +1457,23 @@ function makeMapDnsTool(ctx) {
   return harness.defineTool({
     name: 'map_dns',
     description:
-      'Shodan DNS 批量解析: 把域名解析为 IP (GET /dns/resolve)。' +
-      'hostnames 传逗号分隔的域名列表(最多 20 个), 如 example.com,api.example.com。' +
-      '返回 {域名: IP} 映射; 无法解析的域名会缺失, 不消耗查询额度。',
+      'Shodan DNS 查询, hostnames 与 domain 二选一: ' +
+      '(1) hostnames 批量解析 — 逗号分隔域名(最多 20 个)解析为 {域名: IP} 映射, 不消耗查询额度; ' +
+      '(2) domain 子域枚举 — 返回该域名下 Shodan 已知的子域及 DNS 记录(A/CNAME, 最多 300 条)。',
     parameters: {
       type: 'object',
       properties: {
         hostnames: {
           type: 'string',
-          description: '逗号分隔的域名列表, 最多 20 个, 如 example.com,api.example.com',
+          description: '批量解析: 逗号分隔的域名列表, 最多 20 个, 如 example.com,api.example.com',
+        },
+        domain: {
+          type: 'string',
+          description: '子域枚举: 目标主域名, 如 example.com (返回子域与 DNS 记录)',
         },
         key: { type: 'string', description: '可选: 临时覆盖 Shodan API Key' },
       },
-      required: ['hostnames'],
+      required: [],
     },
     output: JSON_OUTPUT,
     // 只读操作, 可与其他 map_* 工具并行
@@ -1266,7 +1489,12 @@ function makeMapDnsTool(ctx) {
               PRIMARY_REFS.shodan,
           }
         }
-        const res = await dnsResolveShodan(ctx, String(args.hostnames), key)
+        if (!args.hostnames && !args.domain) {
+          return { ok: false, error: 'hostnames 与 domain 必须提供一个 (批量解析/子域枚举)' }
+        }
+        const res = args.domain
+          ? await dnsDomainShodan(ctx, String(args.domain), key)
+          : await dnsResolveShodan(ctx, String(args.hostnames), key)
         res.ok = true
         return res
       } catch (error) {

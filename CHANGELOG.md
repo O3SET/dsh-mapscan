@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-15
+
+### Added
+
+- `map_search` 联合搜索：`platform: 'all'` 对所有已配置 Key 的平台**并行**发起同一查询，按 `ip:port` 去重合并，附各平台报告（含单平台失败降级）与 `skipped` 清单
+- `map_search` 自动翻页：`pages` 参数(1~5)逐页合并结果，空页提前停止，报告 `pages_fetched`
+- 搜索结果附 `summary` 聚合摘要：唯一 IP 数 / Top 端口 / Top 产品 / Top 国家（`src/lib/summary.js`）
+- `map_dns` 子域枚举：`domain` 参数走 `/dns/domain/{domain}`，返回子域与 A/CNAME 记录（最多 300 条）
+- 常见错误码中文提示表（`src/lib/errors.js`）：FOFA -2/-12/-15/-700、Hunter 400/401/403
+
+### Changed
+
+- `map_dns` 的 `hostnames` 改为可选（与 `domain` 二选一），缺参返回明确指引
+
 ## [1.1.0] - 2026-08-15
 
 ### Added

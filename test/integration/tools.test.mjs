@@ -318,7 +318,7 @@ const QUAKE_USER_RES = JSON.stringify({
 
 // ---------- 测试 ----------
 
-test('插件注册全部 5 个工具', async () => {
+test('插件注册全部 6 个工具', async () => {
   const { plugin, harness } = await loadPlugin()
   plugin.apply(makeCtx({ shell: makeShell([]) }))
   assert.deepEqual([...harness.tools.keys()].sort(), [
@@ -370,6 +370,12 @@ test('map_search: fofa 端到端归一化 + 配额字段', async () => {
   assert.equal(res.results[0].host, 'a.example.com')
   assert.equal(res.results[1].ip, '5.6.7.8')
   assert.equal('title' in res.results[1], false) // 空标题被剔除
+  assert.equal(res.pages_fetched, 1)
+  assert.equal(res.summary.unique_ips, 2)
+  assert.deepEqual(res.summary.top_ports, [
+    { name: '443', count: 1 },
+    { name: '80', count: 1 },
+  ])
   const cmd = shell.calls[0].command
   assert.match(cmd, /fofa\.info\/api\/v1\/search\/all/)
   assert.match(cmd, /&page=1&size=20/)
@@ -530,6 +536,189 @@ test('map_dns: 未配置 shodan Key 返回可操作错误', async () => {
   assert.match(res.error, /map_set_keys/)
 })
 
+test('map_dns: domain 参数枚举子域', async () => {
+  const domainRes = JSON.stringify({
+    domain: 'example.com',
+    tags: ['cdn'],
+    data: [
+      { subdomain: 'www.example.com', type: 'CNAME', value: 'edge.example.net' },
+      { subdomain: 'api.example.com', type: 'A', value: '1.2.3.4', last_seen: '2026-08-01' },
+    ],
+  })
+  const shell = makeShell([{ stdout: `${domainRes}\n__MAPSCAN_HTTP__:200` }])
+  const credentials = makeCredentials({ SHODAN_API_KEY: 'K-SHODAN' })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools.get('map_dns').execute({ domain: 'example.com' })
+  assert.equal(res.ok, true)
+  assert.equal(res.count, 2)
+  assert.deepEqual(res.subdomains[0], {
+    subdomain: 'www.example.com',
+    type: 'CNAME',
+    value: 'edge.example.net',
+  })
+  assert.deepEqual(res.tags, ['cdn'])
+  assert.match(shell.calls[0].command, /dns\/domain\/example\.com/)
+})
+
+test('map_dns: hostnames 与 domain 都缺时返回明确错误', async () => {
+  const credentials = makeCredentials({ SHODAN_API_KEY: 'K-SHODAN' })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell: makeShell([]), credentials }))
+  const res = await harness.tools.get('map_dns').execute({})
+  assert.equal(res.ok, false)
+  assert.match(res.error, /hostnames 与 domain 必须提供一个/)
+})
+
+test('map_search: pages 自动翻页合并结果', async () => {
+  const page2 = JSON.stringify({
+    error: false,
+    size: 1,
+    page: 2,
+    results: [
+      [
+        '9.9.9.9',
+        '443',
+        'https',
+        'c.example.com',
+        '',
+        'example.net',
+        'nginx',
+        'CN',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+      ],
+    ],
+  })
+  const shell = makeShell([
+    { stdout: `${FOFA_SEARCH_RES}\n__MAPSCAN_HTTP__:200` },
+    { stdout: `${page2}\n__MAPSCAN_HTTP__:200` },
+  ])
+  const credentials = makeCredentials({ FOFA_API_KEY: 'K-FOFA' })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools.get('map_search').execute({
+    platform: 'fofa',
+    query: 'app="nginx"',
+    pages: 2,
+  })
+  assert.equal(res.ok, true)
+  assert.equal(res.returned, 3)
+  assert.equal(res.pages_fetched, 2)
+  assert.equal(res.summary.unique_ips, 3)
+  assert.match(shell.calls[1].command, /&page=2&/)
+})
+
+test('map_search: pages 翻页遇到空页提前停止', async () => {
+  const empty = JSON.stringify({ error: false, size: 0, page: 2, results: [] })
+  const shell = makeShell([
+    { stdout: `${FOFA_SEARCH_RES}\n__MAPSCAN_HTTP__:200` },
+    { stdout: `${empty}\n__MAPSCAN_HTTP__:200` },
+  ])
+  const credentials = makeCredentials({ FOFA_API_KEY: 'K-FOFA' })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools.get('map_search').execute({
+    platform: 'fofa',
+    query: 'app="nginx"',
+    pages: 5,
+  })
+  assert.equal(res.ok, true)
+  assert.equal(res.pages_fetched, 2) // 第 2 页空, 不再请求第 3 页
+  assert.equal(shell.calls.length, 2)
+})
+
+test('map_search: platform=all 联合搜索并行聚合', async () => {
+  const hunter401 = JSON.stringify({ code: 401, data: null, message: '令牌过期' })
+  const shell = makeShell([
+    { stdout: `${FOFA_SEARCH_RES}\n__MAPSCAN_HTTP__:200` },
+    { stdout: `${SHODAN_SEARCH_RES}\n__MAPSCAN_HTTP__:200` },
+    { stdout: `${hunter401}\n__MAPSCAN_HTTP__:200` },
+  ])
+  const credentials = makeCredentials({
+    MAPSCAN_FOFA_API_KEY: 'K-FOFA',
+    MAPSCAN_SHODAN_API_KEY: 'K-SHODAN',
+    MAPSCAN_HUNTER_API_KEY: 'K-HUNTER',
+  })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools.get('map_search').execute({
+    platform: 'all',
+    query: 'nginx',
+    size: 20,
+  })
+  assert.equal(res.ok, true)
+  assert.equal(res.returned, 3)
+  assert.equal(res.deduped, 0)
+  assert.equal(res.platforms.fofa.total, 2)
+  assert.equal(res.platforms.shodan.total, 1)
+  assert.match(res.platforms.hunter.error, /令牌过期/)
+  assert.deepEqual(res.skipped, ['zoomeye', 'quake'])
+  assert.equal(res.summary.unique_ips, 3)
+})
+
+test('map_search: platform=all 按 ip:port 去重并保留首个来源', async () => {
+  const shodanDup = JSON.stringify({
+    total: 1,
+    matches: [
+      {
+        ip_str: '1.2.3.4',
+        port: 443,
+        transport: 'tcp',
+        hostnames: ['dup.example.com'],
+        product: 'nginx',
+        http: {},
+        location: {},
+        data: 'banner',
+        _shodan: { module: 'https' },
+      },
+    ],
+  })
+  const shell = makeShell([
+    { stdout: `${FOFA_SEARCH_RES}\n__MAPSCAN_HTTP__:200` },
+    { stdout: `${shodanDup}\n__MAPSCAN_HTTP__:200` },
+  ])
+  const credentials = makeCredentials({
+    MAPSCAN_FOFA_API_KEY: 'K-FOFA',
+    MAPSCAN_SHODAN_API_KEY: 'K-SHODAN',
+  })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools.get('map_search').execute({ platform: 'all', query: 'nginx' })
+  assert.equal(res.ok, true)
+  assert.equal(res.returned, 2) // 2 + 1 - 1 去重
+  assert.equal(res.deduped, 1)
+  assert.equal(res.results[0].source, 'fofa') // 首个来源保留
+  assert.equal(res.results[0].ip, '1.2.3.4')
+})
+
+test('map_search: platform=all 所有平台都未配置 Key 时返回可操作错误', async () => {
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell: makeShell([]) }))
+  const res = await harness.tools.get('map_search').execute({ platform: 'all', query: 'nginx' })
+  assert.equal(res.ok, false)
+  assert.match(res.error, /所有平台都未配置 API Key/)
+  assert.match(res.error, /map_set_keys/)
+})
+
+test('map_search: hunter 错误码附带中文提示', async () => {
+  const hunter401 = JSON.stringify({ code: 401, data: null, message: '令牌过期' })
+  const shell = makeShell([{ stdout: `${hunter401}\n__MAPSCAN_HTTP__:200` }])
+  const credentials = makeCredentials({ MAPSCAN_HUNTER_API_KEY: 'K-HUNTER' })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools
+    .get('map_search')
+    .execute({ platform: 'hunter', query: 'ip="8.8.8.8"' })
+  assert.equal(res.ok, false)
+  assert.match(res.error, /令牌过期/)
+  assert.match(res.error, /重新生成/)
+})
+
 test('map_stats: fofa 聚合统计透传 aggs', async () => {
   const shell = makeShell([{ stdout: `${FOFA_STATS_RES}\n__MAPSCAN_HTTP__:200` }])
   const credentials = makeCredentials({ FOFA_API_KEY: 'K-FOFA' })
@@ -589,5 +778,6 @@ test('工具参数 schema 必备字段齐备', async () => {
     'hunter',
     'zoomeye',
     'quake',
+    'all',
   ])
 })

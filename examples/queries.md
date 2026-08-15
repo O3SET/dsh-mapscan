@@ -51,3 +51,19 @@ map_account { "platform": "shodan" }
 ```
 map_search { "platform": "fofa", "query": "app=\"nginx\"", "size": 100, "save": "fofa-nginx.json" }
 ```
+
+## 联合搜索与子域收集
+
+```
+# 联合搜索: 所有已配置 Key 的平台并行查询同一语句, 结果按 ip:port 去重并附摘要
+map_search { "platform": "all", "query": "example.com", "size": 20 }
+
+# 自动翻页: 连续取 3 页合并 (资产清单场景)
+map_search { "platform": "fofa", "query": "domain=\"example.com\"", "size": 100, "pages": 3 }
+
+# 子域枚举: Shodan 已知子域与 A/CNAME 记录
+map_dns { "domain": "example.com" }
+
+# 批量解析: 子域 -> IP (免查询额度)
+map_dns { "hostnames": "www.example.com,api.example.com,mail.example.com" }
+```

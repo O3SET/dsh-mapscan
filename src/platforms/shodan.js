@@ -174,3 +174,29 @@ export async function honeyscoreShodan(ctx, ip, key) {
   }
   return data
 }
+
+/** dns/domain/{domain} — 子域枚举 (A/CNAME 记录, 最多取 300 条) */
+export async function dnsDomainShodan(ctx, domain, key) {
+  const url = `${SHODAN_BASE}/dns/domain/${encodeURIComponent(domain)}?key=${encodeURIComponent(key)}`
+  const { data } = await fetchJson(ctx, url, { timeoutSec: 30 })
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`Shodan 返回异常: ${trunc(JSON.stringify(data), 300)}`)
+  }
+  const items = Array.isArray(data.data) ? data.data : []
+  const subdomains = items.slice(0, 300).map((s) =>
+    clean({
+      subdomain: s.subdomain,
+      type: s.type,
+      value: s.value,
+      last_seen: s.last_seen,
+    }),
+  )
+  return clean({
+    platform: 'shodan',
+    domain: data.domain || domain,
+    tags: Array.isArray(data.tags) ? data.tags : undefined,
+    count: items.length,
+    returned: subdomains.length,
+    subdomains,
+  })
+}

@@ -4,6 +4,7 @@
  * 要点: query 需 URL-safe Base64 编码后放 search 参数; 无独立账户端点, 配额由一次最小搜索读取。
  * @module src/platforms/hunter
  */
+import { hunterErrMsg } from '../lib/errors.js'
 import { MAX_BANNER, clampInt, clean, trunc } from '../lib/utils.js'
 import { fetchJson } from '../lib/http.js'
 
@@ -28,9 +29,7 @@ export async function searchHunter(ctx, args, key) {
   if (args.end_time) url += `&end_time=${encodeURIComponent(String(args.end_time))}`
   const { data } = await fetchJson(ctx, url, { timeoutSec: 45 })
   if (!data || data.code !== 200) {
-    throw new Error(
-      `Hunter 返回错误 code=${data && data.code}: ${trunc((data && (data.message || data.msg)) || '未知错误', 300)}`,
-    )
+    throw new Error(hunterErrMsg(data))
   }
   const d = data.data || {}
   const arr = Array.isArray(d.arr) ? d.arr : []
@@ -98,9 +97,7 @@ export async function accountHunter(ctx, key) {
     `&search=${encodeURIComponent(b64)}&page=1&page_size=1`
   const { data } = await fetchJson(ctx, url, { timeoutSec: 30 })
   if (!data || data.code !== 200) {
-    throw new Error(
-      `Hunter 返回错误 code=${data && data.code}: ${trunc((data && (data.message || data.msg)) || '未知错误', 300)}`,
-    )
+    throw new Error(hunterErrMsg(data))
   }
   const d = data.data || {}
   return clean({

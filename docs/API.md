@@ -35,14 +35,17 @@ curl 'https://api.shodan.io/shodan/host/search?key=K&query=nginx&page=1&minify=f
 curl 'https://api.shodan.io/shodan/host/count?key=K&query=nginx&facets=org,country'
 curl 'https://api.shodan.io/shodan/host/1.1.1.1?key=K&minify=false'
 curl 'https://api.shodan.io/api-info?key=K'
-# DNS 批量解析 (map_dns, 不消耗查询额度)
+# DNS 批量解析 (map_dns hostnames, 不消耗查询额度)
 curl 'https://api.shodan.io/dns/resolve?hostnames=example.com,api.example.com&key=K'
+# 子域枚举 (map_dns domain)
+curl 'https://api.shodan.io/dns/domain/example.com?key=K'
 # 蜜罐评分 (map_ip_detail honeyscore=true, 需会员计划)
 curl 'https://api.shodan.io/labs/honeyscore/1.1.1.1?key=K'
 ```
 
 - 搜索响应：`{total, matches: [{ip_str, port, transport, hostnames, http, ssl, location, data, _shodan, vulns?...}]}`
 - `dns/resolve` 返回 `{域名: IP}` 映射，无法解析的域名缺失
+- `dns/domain/{domain}` 返回 `{domain, tags, data: [{subdomain, type, value, last_seen}]}`（子域枚举）
 - `labs/honeyscore` 返回 0.0~1.0 数字（0=非蜜罐倾向）；非会员返回 401
 - 401 时响应体为 HTML 文本，插件会以「非 JSON 响应」报错提示
 
