@@ -1,5 +1,5 @@
 /**
- * 工具注册表 — 插件 apply 时注册全部 5 个工具。
+ * 工具注册表 — 插件 apply 时注册全部 6 个工具。
  * @module src/tools
  */
 import { makeMapAccountTool } from './map_account.js'
