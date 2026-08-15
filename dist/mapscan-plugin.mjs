@@ -1,7 +1,11 @@
 // ============================================================
 // MapScan — 网络空间测绘综合插件 (FOFA / Shodan / Hunter / ZoomEye / Quake)
 // 本文件由 scripts/build.mjs 自动生成, 请勿手工编辑; 修改请编辑 src/** 后重新构建。
-// 用法: 将本文件整体作为 Dynamic Cordis Plugin 的 code.host (函数体) 使用。
+// 用法 (持久化安装): 在 ~/.dsh/profiles/<profile>/cordis.patch.yml 添加
+//   - insert:
+//       - id: mapscan
+//         name: file:///<本文件绝对路径>
+// 或运行 node scripts/install.mjs 一键安装 (HMR 自动生效或重启 DSH)。
 // ============================================================
 // ---- src/lib/utils.js ----
 /**
@@ -1625,4 +1629,4 @@ const plugin = {
 }
 
 
-return plugin
+export default plugin

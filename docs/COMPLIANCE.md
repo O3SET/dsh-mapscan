@@ -57,7 +57,7 @@ radar 判定层级：**L0 发现（topic）→ L1 清单（package.json/入口�
 
 ```text
 ## 测试环境
-- 插件: mapscan-dsh v1.2.0 (commit <发布 commit>)
+- 插件: mapscan-dsh v1.3.0 (commit <发布 commit>)
 - DSH: @deepseek-ai/dsh 0.1.0-rc.6 (2026-08-15 官方快照)
 - OS: Windows 11; Node: v24.9.0; curl: 8.21
 

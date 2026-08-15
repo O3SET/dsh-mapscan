@@ -6,10 +6,10 @@ import { PRIMARY_REFS, resolveKey } from '../lib/credentials.js'
 import { trunc } from '../lib/utils.js'
 import { DETAILERS } from '../platforms/index.js'
 import { honeyscoreShodan } from '../platforms/shodan.js'
-import { JSON_OUTPUT, toolError } from './common.js'
+import { JSON_OUTPUT, defineTool, toolError } from './common.js'
 
 export function makeMapIpDetailTool(ctx) {
-  return harness.defineTool({
+  return defineTool({
     name: 'map_ip_detail',
     description:
       '查询单个 IP 的主机测绘详情。platform 支持 fofa、shodan。' +

@@ -3,10 +3,10 @@
  * @module src/tools/map_set_keys
  */
 import { setKeys } from '../lib/credentials.js'
-import { JSON_OUTPUT, toolError } from './common.js'
+import { JSON_OUTPUT, defineTool, toolError } from './common.js'
 
 export function makeMapSetKeysTool(ctx) {
-  return harness.defineTool({
+  return defineTool({
     name: 'map_set_keys',
     description:
       '持久化保存或查看各测绘平台的 API Key(存入凭证库，可被同名环境变量覆盖)。' +

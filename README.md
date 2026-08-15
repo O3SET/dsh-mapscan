@@ -1,7 +1,7 @@
 # MapScan DSH
 
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![version](https://img.shields.io/badge/version-1.2.0-brightgreen)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-1.3.0-brightgreen)](CHANGELOG.md)
 [![node](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=node.js)](package.json)
 [![CI](https://github.com/O3SET/dsh-mapscan/actions/workflows/ci.yml/badge.svg)](https://github.com/O3SET/dsh-mapscan/actions/workflows/ci.yml)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -48,25 +48,37 @@ MapScan 把它们封装成 6 个统一的动态工具，输出**归一化结果*
 
 ## Install / Uninstall
 
-**安装（DSH 会话内）**
+## Install / Uninstall
 
-1. 构建产物 [`dist/mapscan-host.js`](dist/mapscan-host.js) 即 DSH 函数体，将其整体作为 `code.host` 提交：
+**✨ 一键安装（推荐，持久化）**
 
-   ```
-   cordis_define { kind: new, idPrefix: mscan, code: { host: <dist 内容> } }
-   cordis_run   { pluginId: ..., packageId: ..., mode: run }
-   ```
+```powershell
+git clone https://github.com/O3SET/dsh-mapscan.git
+node dsh-mapscan\scripts\install.mjs
+# 重启 DSH 进程（或等待长驻界面 HMR 自动重载）→ 6 个 map_* 工具全局可用
+```
 
-   也可以直接让 Agent 执行：「读取 `dist/mapscan-host.js` 并通过 cordis_define/cordis_run 安装」。
+`install.mjs` 只做一件事：向你的 DSH profile 补丁层
+（`~/.dsh/profiles/<profile>/cordis.patch.yml`）追加一行 Loader 补丁，
+指向仓库 `dist/mapscan-plugin.mjs`（自包含 ESM，无任何外部依赖），
+由 Cordis Loader 在启动时加载 —— **不再需要手工粘贴任何代码**。
 
-2. **升级**：改 `src/**` → `npm run check` → 用新 dist 走 `cordis_define`(existing `mscan-1`) + `cordis_run`(update)；
-   旧包保留可回滚（`cordis_run` mode `run` + 旧 packageId）。
+- 非默认 profile：`$env:DSH_PROFILE="你的profile"; node scripts/install.mjs`
+- 卸载：`node scripts/uninstall.mjs`（移除补丁行后重启）
+- 升级：`git pull` 后**无需任何操作**（补丁行指向仓库文件，重启即用新版；重新构建后见 Development）
+- 幂等：重复执行安全（检测到 `id: mapscan` 自动跳过）
 
-3. **禁用 / 卸载**：
+**开发/预览安装（动态插件，会话级，可选）**
 
-   - 临时停用（保留版本与授权）：`cordis_stop { pluginId: "mscan-1" }`
-   - 彻底删除：`cordis_stop` 后 `cordis_undefine { pluginId: "mscan-1" }`
-   - 清除已存 Key：`map_set_keys { "remove": ["fofa","shodan","hunter","zoomeye","quake"] }`
+构建产物 [`dist/mapscan-host.js`](dist/mapscan-host.js) 是 DSH 函数体，可在会话内临时安装：
+
+```
+cordis_define { kind: new, idPrefix: mscan, code: { host: <dist 内容> } }
+cordis_run   { pluginId: ..., packageId: ..., mode: run }
+```
+
+动态插件与持久化插件共存时作用域版本优先；正式使用建议直接走一键安装。
+清除已存 Key：`map_set_keys { "remove": ["fofa","shodan","hunter","zoomeye","quake"] }`
 
 ## Quick start
 

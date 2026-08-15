@@ -4,10 +4,10 @@
  */
 import { PRIMARY_REFS, resolveKey } from '../lib/credentials.js'
 import { dnsDomainShodan, dnsResolveShodan } from '../platforms/shodan.js'
-import { JSON_OUTPUT, toolError } from './common.js'
+import { JSON_OUTPUT, defineTool, toolError } from './common.js'
 
 export function makeMapDnsTool(ctx) {
-  return harness.defineTool({
+  return defineTool({
     name: 'map_dns',
     description:
       'Shodan DNS 查询, hostnames 与 domain 二选一: ' +

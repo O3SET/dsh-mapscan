@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-15
+
+### Added
+
+- **一键安装（持久化）**：`scripts/install.mjs` 向 DSH profile 补丁层（`~/.dsh/profiles/<profile>/cordis.patch.yml`）追加 Loader 补丁行，重启 DSH 后 6 个工具全局可用，无需手工粘贴代码；`scripts/uninstall.mjs` 一键卸载
+- **双产物构建**：新增 `dist/mapscan-plugin.mjs`（自包含 ESM，默认导出 Cordis 插件，经真实 `ctx.tools.register` 注册），与 `dist/mapscan-host.js`（沙箱函数体）同源生成
+- `src/lib/runtime.js` 运行时适配器：同一份工具代码自动适配沙箱（`harness.defineTool`）与 Loader 真实运行时（手写 ToolDefinition）
+- Loader 变体集成测试 4 例（Node 直接导入 ESM 产物验证注册形状与行为）
+
 ## [1.2.0] - 2026-08-15
 
 ### Added

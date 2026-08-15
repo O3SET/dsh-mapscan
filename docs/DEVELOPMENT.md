@@ -3,15 +3,21 @@
 ## 架构总览
 
 ```
-src/ (ESM 模块, 可单测)         scripts/build.mjs (零依赖)      dist/mapscan-host.js (DSH 函数体)
-┌─────────────────────┐         ┌─────────────────────┐        ┌──────────────────────────┐
-│ lib/   utils/http/  │ ──────► │ 去 import/export     │ ─────► │ (async () => {           │
-│        credentials  │         │ 按依赖序拼接          │        │   <拼接源码>             │
-│ platforms/ 5 平台    │         │ 追加 return plugin   │        │   return plugin         │
-│ tools/   5 工具      │         │ vm 语法校验          │        │ })()                    │
-│ index.js 插件入口    │         └─────────────────────┘        └──────────────────────────┘
+src/ (ESM 模块, 可单测)         scripts/build.mjs (零依赖)      dist/ (双产物, 同源生成)
+┌─────────────────────┐         ┌─────────────────────┐        ┌──────────────────────────────┐
+│ lib/   utils/http/  │ ──────► │ 去 import/export     │ ─────► │ mapscan-host.js    (沙箱函数体) │
+│        credentials  │         │ 按依赖序拼接          │        │ mapscan-plugin.mjs (Loader ESM) │
+│        errors/summary│        │ 追加对应尾部          │        └──────────────────────────────┘
+│        runtime(适配) │         │ vm 语法校验 + 动态导入 │
+│ platforms/ 5 平台    │         └─────────────────────┘
+│ tools/   6 工具      │
+│ index.js 插件入口    │
 └─────────────────────┘
 ```
+
+- `dist/mapscan-host.js`：DSH 动态插件函数体（`return plugin`），会话内 `cordis_define`/`cordis_run` 使用
+- `dist/mapscan-plugin.mjs`：自包含 ESM（`export default plugin`），供 Cordis Loader 持久化加载 ——
+  `scripts/install.mjs` 把它写入 profile 补丁层，重启 DSH 即全局安装
 
 DSH 动态插件的 `code.host` 是**函数体**（不是模块），因此：
 

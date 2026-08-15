@@ -5,6 +5,7 @@
  * @module src/tools/common
  */
 import { trunc } from '../lib/utils.js'
+export { defineTool, registerTool } from '../lib/runtime.js'
 
 /** output.render: 业务错误或结果 -> 纯文本块 */
 export function textRender(_args, value) {
@@ -19,5 +20,11 @@ export function toolError(prefix, error) {
   return { ok: false, error: `${prefix}: ${trunc(message, 800)}` }
 }
 
-/** 各工具复用的输出定义 */
-export const JSON_OUTPUT = { schema: { type: 'json' }, render: textRender }
+/**
+ * 各工具复用的输出定义。
+ * 沙箱下用注解型 { type: 'json' }; Loader(真实运行时)下用原始 JSON Schema 空对象(接受任意值)。
+ */
+export const JSON_OUTPUT = {
+  schema: typeof harness !== 'undefined' ? { type: 'json' } : {},
+  render: textRender,
+}

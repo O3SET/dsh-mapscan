@@ -4,10 +4,10 @@
  */
 import { PRIMARY_REFS, resolveKey } from '../lib/credentials.js'
 import { STATSERS } from '../platforms/index.js'
-import { JSON_OUTPUT, toolError } from './common.js'
+import { JSON_OUTPUT, defineTool, toolError } from './common.js'
 
 export function makeMapStatsTool(ctx) {
-  return harness.defineTool({
+  return defineTool({
     name: 'map_stats',
     description:
       '聚合统计。fofa: 按 fields(逗号分隔, 最多 5 个, 默认 title)统计命中数量分布; ' +

@@ -1,6 +1,6 @@
 {
   "name": "mapscan-dsh",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "DeepSeek Harness 动态 Cordis 插件：FOFA / Shodan / 鹰图Hunter / ZoomEye / Quake 网络空间测绘综合查询",
   "type": "module",
   "license": "MIT",
@@ -21,6 +21,7 @@
   },
   "dsh": {
     "entry": "./dist/mapscan-host.js",
+    "loader": "./dist/mapscan-plugin.mjs",
     "half": "host"
   },
   "dependencies": {},
@@ -32,6 +33,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run lint && npm run format:check && npm run test",
+    "install:local": "node scripts/install.mjs",
+    "uninstall:local": "node scripts/uninstall.mjs",
     "prepack": "npm run check",
     "prepare": "husky"
   },

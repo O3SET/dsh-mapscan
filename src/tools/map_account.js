@@ -4,10 +4,10 @@
  */
 import { PRIMARY_REFS, resolveKey } from '../lib/credentials.js'
 import { ACCOUNTERS } from '../platforms/index.js'
-import { JSON_OUTPUT, toolError } from './common.js'
+import { JSON_OUTPUT, defineTool, toolError } from './common.js'
 
 export function makeMapAccountTool(ctx) {
-  return harness.defineTool({
+  return defineTool({
     name: 'map_account',
     description:
       '查询平台账户信息与配额: fofa(fcoin/F点/vip)、shodan(plan/query_credits/scan_credits)、' +

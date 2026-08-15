@@ -7,7 +7,7 @@ import { summarize } from '../lib/summary.js'
 import { clampInt, trunc } from '../lib/utils.js'
 import { SEARCHERS } from '../platforms/index.js'
 import { searchUnion } from '../platforms/union.js'
-import { JSON_OUTPUT, toolError } from './common.js'
+import { JSON_OUTPUT, defineTool, toolError } from './common.js'
 
 /**
  * 单平台翻页: 从 args.page 起顺序拉取 pages 页并合并, 空页提前停止。
@@ -35,7 +35,7 @@ async function searchPaged(ctx, platform, args, key, pages) {
 }
 
 export function makeMapSearchTool(ctx) {
-  return harness.defineTool({
+  return defineTool({
     name: 'map_search',
     description:
       '综合查询网络空间测绘平台 FOFA / Shodan / 鹰图Hunter / ZoomEye / Quake。' +

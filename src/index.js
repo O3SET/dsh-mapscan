@@ -5,6 +5,7 @@
  * @module src/index
  */
 import { makeTools } from './tools/index.js'
+import { registerTool } from './tools/common.js'
 
 /** MapScan 插件对象 */
 export const plugin = {
@@ -13,7 +14,7 @@ export const plugin = {
   apply(ctx) {
     for (const tool of makeTools(ctx)) {
       // 每个注册 disposer 归属当前 Plugin Fiber, stop/update 时自动回收
-      ctx.effect(() => harness.registerTool(ctx, tool))
+      ctx.effect(() => registerTool(ctx, tool))
     }
   },
 }
