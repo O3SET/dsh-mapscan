@@ -57,7 +57,7 @@
   ],
   "devDependencies": {
     "eslint": "^9.0.0",
-    "globals": "^16.0.0",
+    "globals": "^17.10.0",
     "husky": "^9.0.0",
     "lint-staged": "^16.0.0",
     "prettier": "^3.0.0"
