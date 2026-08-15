@@ -3,15 +3,15 @@
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![version](https://img.shields.io/badge/version-1.0.1-brightgreen)](CHANGELOG.md)
 [![node](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=node.js)](package.json)
+[![CI](https://github.com/O3SET/dsh-mapscan/actions/workflows/ci.yml/badge.svg)](https://github.com/O3SET/dsh-mapscan/actions/workflows/ci.yml)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 > DeepSeek Harness 动态 Cordis 插件：**FOFA / Shodan / 鹰图 Hunter / ZoomEye / Quake** 五平台网络空间测绘综合查询。
 > 统一搜索、归一化输出、API Key 持久化管理，面向渗透测试与资产测绘工作流。
 
-<!-- 推送到 GitHub 后按顺序启用：
-  1. 仓库 Settings → Topics 添加 dsh-plugin（生态自动收录前提, 见 docs/COMPLIANCE.md）
-  2. CI 徽章: [![CI](https://github.com/<owner>/mapscan-dsh/actions/workflows/ci.yml/badge.svg)](https://github.com/<owner>/mapscan-dsh/actions/workflows/ci.yml)
-  3. 收录徽章 (被 awesome-dsh-plugin 收录后):
+<!-- 生态收录步骤 (详见 docs/COMPLIANCE.md 第六节)：
+  1. 仓库 Settings → Topics 添加 dsh-plugin（radar 每 8 小时自动扫描收录）
+  2. 被 awesome-dsh-plugin 精选收录后, 可挂 badge:
      [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 -->
 

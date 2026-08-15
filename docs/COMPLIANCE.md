@@ -39,7 +39,7 @@ radar 判定层级：**L0 发现（topic）→ L1 清单（package.json/入口�
 **awesome-dsh-plugin（精选列表）**：
 
 1. fork → 在 `README.md` 与 `README.zh.md` 的对应分类各加一行：
-   `- [mapscan-dsh](https://github.com/<owner>/mapscan-dsh) — one-line description`
+   `- [mapscan-dsh](https://github.com/O3SET/dsh-mapscan) — one-line description`
 2. 仓库添加 `dsh-plugin` topic（便于他人发现）；
 3. 收录后可挂官方 badge：`[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)`。
 
