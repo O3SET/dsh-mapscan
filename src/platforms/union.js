@@ -4,18 +4,15 @@
  * 注意: 会消耗所有已配置平台的配额, 请谨慎使用。
  * @module src/platforms/union
  */
-import { resolveKey } from '../lib/credentials.js'
+import { configuredPlatforms } from '../lib/credentials.js'
 import { summarize } from '../lib/summary.js'
 import { PLATFORMS, clampInt, trunc } from '../lib/utils.js'
 import { SEARCHERS } from './index.js'
 
 /** 全平台联合搜索; args.key 不适用 (各平台 Key 独立配置) */
 export async function searchUnion(ctx, args) {
-  const entries = []
-  for (const p of PLATFORMS) {
-    const key = await resolveKey(ctx, p, undefined)
-    if (key) entries.push([p, key])
-  }
+  // 只使用已填写 API Key 的平台, 未填写的自动跳过
+  const entries = await configuredPlatforms(ctx, PLATFORMS)
   if (entries.length === 0) {
     throw new Error('所有平台都未配置 API Key, 无法联合搜索。请先 map_set_keys 或设置环境变量')
   }

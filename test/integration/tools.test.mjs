@@ -304,6 +304,29 @@ const FOFA_STATS_RES = JSON.stringify({
   },
 })
 
+const FOFA_HOST_RES = JSON.stringify({
+  error: false,
+  ip: '1.2.3.4',
+  host: 'a.example.com',
+  asn: 12345,
+  org: 'Example Org',
+  country_name: 'China',
+  country_code: 'CN',
+  protocol: ['https'],
+  ports: [443, 80],
+  lastupdatetime: '2026-08-01',
+})
+
+const FOFA_INFO_RES = JSON.stringify({
+  error: false,
+  email: 'a@b.c',
+  username: 'user1',
+  fcoin: 100,
+  fofa_point: 50,
+  isvip: false,
+  vip_level: 0,
+})
+
 const QUAKE_USER_RES = JSON.stringify({
   code: 0,
   message: '',
@@ -771,7 +794,7 @@ test('工具参数 schema 必备字段齐备', async () => {
   const { plugin, harness } = await loadPlugin()
   plugin.apply(makeCtx({ shell: makeShell([]) }))
   const search = harness.tools.get('map_search')
-  assert.deepEqual(search.parameters.required, ['platform', 'query'])
+  assert.deepEqual(search.parameters.required, ['query']) // platform 可选: 缺省自动联合已配置平台
   assert.deepEqual(search.parameters.properties.platform.enum, [
     'fofa',
     'shodan',
@@ -779,5 +802,97 @@ test('工具参数 schema 必备字段齐备', async () => {
     'zoomeye',
     'quake',
     'all',
+    'auto',
   ])
+  assert.deepEqual(harness.tools.get('map_ip_detail').parameters.required, ['ip'])
+  assert.deepEqual(harness.tools.get('map_stats').parameters.required, ['query'])
+  assert.deepEqual(harness.tools.get('map_account').parameters.required, [])
+})
+
+test('map_search: 缺省 platform 自动联合已配置平台并跳过未配置', async () => {
+  const shell = makeShell([{ stdout: `${FOFA_SEARCH_RES}\n__MAPSCAN_HTTP__:200` }])
+  const credentials = makeCredentials({ MAPSCAN_FOFA_API_KEY: 'K-FOFA' }) // 只填了 fofa
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools.get('map_search').execute({ query: 'app="nginx"' })
+  assert.equal(res.ok, true)
+  assert.equal(res.platform, 'all')
+  assert.equal(res.returned, 2)
+  assert.deepEqual(res.skipped, ['shodan', 'hunter', 'zoomeye', 'quake'])
+  assert.equal(res.platforms.fofa.total, 2)
+})
+
+test('map_ip_detail: 缺省 platform 只查已配置平台 (单 Key)', async () => {
+  const shell = makeShell([{ stdout: `${FOFA_HOST_RES}\n__MAPSCAN_HTTP__:200` }])
+  const credentials = makeCredentials({ FOFA_API_KEY: 'K-FOFA' })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools.get('map_ip_detail').execute({ ip: '1.2.3.4' })
+  assert.equal(res.ok, true)
+  assert.equal(res.platform, 'auto')
+  assert.equal(res.platforms.fofa.ip, '1.2.3.4')
+  assert.deepEqual(res.skipped, ['shodan'])
+})
+
+test('map_ip_detail: 缺省 platform 双 Key 并行合并', async () => {
+  const shell = makeShell([
+    { stdout: `${FOFA_HOST_RES}\n__MAPSCAN_HTTP__:200` },
+    { stdout: `${SHODAN_HOST_RES}\n__MAPSCAN_HTTP__:200` },
+  ])
+  const credentials = makeCredentials({ FOFA_API_KEY: 'K-FOFA', SHODAN_API_KEY: 'K-SHODAN' })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools.get('map_ip_detail').execute({ ip: '8.8.8.8' })
+  assert.equal(res.ok, true)
+  assert.equal(res.platform, 'auto')
+  assert.deepEqual(res.platforms.shodan.vulns, ['CVE-2016-1234'])
+  assert.equal(res.platforms.fofa.ip, '1.2.3.4') // 预置响应样本中的 IP
+  assert.deepEqual(res.skipped, [])
+})
+
+test('map_ip_detail: 缺省 platform 无任何 Key 时返回可操作错误', async () => {
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell: makeShell([]) }))
+  const res = await harness.tools.get('map_ip_detail').execute({ ip: '1.2.3.4' })
+  assert.equal(res.ok, false)
+  assert.match(res.error, /fofa 与 shodan 都未配置/)
+})
+
+test('map_account: 缺省 platform 只查已配置平台并列出跳过', async () => {
+  const shell = makeShell([
+    { stdout: `${FOFA_INFO_RES}\n__MAPSCAN_HTTP__:200` },
+    { stdout: `${QUAKE_USER_RES}\n__MAPSCAN_HTTP__:200` },
+  ])
+  const credentials = makeCredentials({
+    MAPSCAN_FOFA_API_KEY: 'K-FOFA',
+    MAPSCAN_QUAKE_API_KEY: 'K-QUAKE',
+  })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools.get('map_account').execute({})
+  assert.equal(res.ok, true)
+  assert.equal(res.platform, 'auto')
+  assert.equal(res.platforms.fofa.fcoin, 100)
+  assert.equal(res.platforms.quake.credit, 1000)
+  assert.deepEqual(res.skipped, ['shodan', 'hunter', 'zoomeye'])
+})
+
+test('map_account: 缺省 platform 无任何 Key 时返回可操作错误', async () => {
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell: makeShell([]) }))
+  const res = await harness.tools.get('map_account').execute({})
+  assert.equal(res.ok, false)
+  assert.match(res.error, /所有平台都未配置/)
+})
+
+test('map_stats: 缺省 platform 单 Key 自动统计并跳过', async () => {
+  const shell = makeShell([{ stdout: `${FOFA_STATS_RES}\n__MAPSCAN_HTTP__:200` }])
+  const credentials = makeCredentials({ FOFA_API_KEY: 'K-FOFA' })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools.get('map_stats').execute({ query: 'app="nginx"' })
+  assert.equal(res.ok, true)
+  assert.equal(res.platform, 'auto')
+  assert.equal(res.platforms.fofa.aggregations.title[0].name, '登录后台')
+  assert.deepEqual(res.skipped, ['shodan'])
 })

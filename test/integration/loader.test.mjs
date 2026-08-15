@@ -60,7 +60,7 @@ test('Loader 变体: 手写 ToolDefinition 形状齐备', async () => {
   const search = ctx.registered.find((t) => t.name === 'map_search')
   assert.equal(typeof search.description, 'string')
   assert.equal(search.parameters.type, 'object')
-  assert.deepEqual(search.parameters.required, ['platform', 'query'])
+  assert.deepEqual(search.parameters.required, ['query']) // platform 可选: 缺省自动联合已配置平台
   assert.deepEqual(search.parameters.properties.platform.enum, [
     'fofa',
     'shodan',
@@ -68,6 +68,7 @@ test('Loader 变体: 手写 ToolDefinition 形状齐备', async () => {
     'zoomeye',
     'quake',
     'all',
+    'auto',
   ])
   // Loader(真实运行时)下 output.schema 为原始空 JSON Schema (接受任意值)
   assert.deepEqual(search.output.schema, {})

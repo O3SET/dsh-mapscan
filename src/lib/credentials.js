@@ -45,6 +45,19 @@ export async function resolveKey(ctx, platform, explicit) {
 }
 
 /**
+ * 返回候选平台中「已配置 Key」的 [platform, key] 列表 —— 未填写 Key 的平台自动跳过。
+ * 这是所有 "platform 缺省/auto" 能力的共用入口。
+ */
+export async function configuredPlatforms(ctx, platforms) {
+  const entries = []
+  for (const p of platforms) {
+    const key = await resolveKey(ctx, p, undefined)
+    if (key) entries.push([p, key])
+  }
+  return entries
+}
+
+/**
  * map_set_keys 业务逻辑: 保存 / 删除 / 查看各平台 Key 配置状态。
  */
 export async function setKeys(ctx, args) {

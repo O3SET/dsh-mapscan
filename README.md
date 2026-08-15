@@ -1,7 +1,7 @@
 # MapScan DSH
 
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![version](https://img.shields.io/badge/version-1.3.0-brightgreen)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-1.4.0-brightgreen)](CHANGELOG.md)
 [![node](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=node.js)](package.json)
 [![CI](https://github.com/O3SET/dsh-mapscan/actions/workflows/ci.yml/badge.svg)](https://github.com/O3SET/dsh-mapscan/actions/workflows/ci.yml)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -21,19 +21,20 @@
 MapScan 把它们封装成 6 个统一的动态工具，输出**归一化结果**（ip/端口/协议/域名/标题/banner/证书/地理/组件/风险），
 并内置 API Key 持久化管理，让渗透测试、SRC 资产梳理、攻击面测绘可以直接用自然语言驱动。
 
-| 工具            | 说明                                                                                                   |
-| --------------- | ------------------------------------------------------------------------------------------------------ |
-| `map_search`    | 五平台统一搜索；`platform:'all'` 联合搜索(并行+去重+摘要)、`pages` 自动翻页、`save` 落盘、平台专属过滤 |
-| `map_ip_detail` | 单 IP 测绘详情：FOFA 端口+历史记录、Shodan 服务列表+SSL 证书+CVE vulns；可选 `honeyscore` 蜜罐评分     |
-| `map_stats`     | 聚合统计：FOFA 字段分布、Shodan 总数+facets                                                            |
-| `map_account`   | 各平台账户与配额（fcoin/F点/query_credits/剩余积分/credit）                                            |
-| `map_dns`       | Shodan DNS：`hostnames` 批量解析(域名→IP, 免额度) / `domain` 子域枚举(A/CNAME 记录)                    |
-| `map_set_keys`  | API Key 持久化管理（凭证库 / 环境变量，支持查看与删除）                                                |
+| 工具            | 说明                                                                                                        |
+| --------------- | ----------------------------------------------------------------------------------------------------------- |
+| `map_search`    | 五平台统一搜索；**platform 可省略**(自动联合所有已填 Key 的平台, 未配置自动跳过)、`pages` 翻页、`save` 落盘 |
+| `map_ip_detail` | 单 IP 测绘详情；**platform 可省略**(自动并行查询已填 Key 的平台)；可选 `honeyscore` 蜜罐评分                |
+| `map_stats`     | 聚合统计；**platform 可省略**(自动统计已填 Key 的平台)：FOFA 字段分布、Shodan 总数+facets                   |
+| `map_account`   | 账户与配额；**platform 可省略**(自动查询所有已填 Key 的平台)：fcoin/F点/query_credits/剩余积分/credit       |
+| `map_dns`       | Shodan DNS：`hostnames` 批量解析(域名→IP, 免额度) / `domain` 子域枚举(A/CNAME 记录)                         |
+| `map_set_keys`  | API Key 持久化管理（凭证库 / 环境变量，支持查看与删除）                                                     |
 
+- **按 Key 自动路由**：所有 platform 参数均可省略——只对**已填写 API Key 的平台**执行，未填写的自动跳过并列入 `skipped`
 - **零运行时依赖**：插件本体只使用 DSH 沙箱能力（`ctx.shell` 驱动的 curl + `web.fetch` 回退），无任何 npm 运行时依赖
 - **沙箱友好**：支持自定义 Header（ZoomEye `API-KEY`）与 POST（Quake `X-QuakeToken`）
-- **可测试**：模块化 ESM 源码 + node:test 单元/集成测试（62 例）+ 零依赖构建流水线
-- **可并行**：只读工具声明 `isConcurrencySafe`；`platform:'all'` 内部多平台并行、结果去重附摘要
+- **可测试**：模块化 ESM 源码 + node:test 单元/集成测试（73 例）+ 零依赖构建流水线
+- **可并行**：只读工具声明 `isConcurrencySafe`；多平台场景内部并行、结果去重附摘要
 
 ## Compatibility
 

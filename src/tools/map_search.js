@@ -42,7 +42,8 @@ export function makeMapSearchTool(ctx) {
       'query 使用各平台原生语法，示例——fofa: app="nginx" && country="CN"; ' +
       'shodan: nginx port:443 country:CN; hunter: ip="1.1.1.1" || web.title="后台"; ' +
       'zoomeye: app:"nginx" +country:"CN"(+为与, 空格为或); quake: port:"80" AND country:"CN"。' +
-      'platform 传 "all" 时对所有已配置 Key 的平台并行联合搜索并按 ip:port 去重(消耗各平台配额)。' +
+      'platform 可省略: 缺省(或 auto/all)时对**所有已填写 API Key 的平台**并行联合搜索并按 ip:port 去重, ' +
+      '未配置 Key 的平台自动跳过并列入 skipped(只消耗已配置平台的配额)。' +
       'pages 参数可自动翻页合并(1~5, 仅单平台生效); 结果附带 summary 聚合摘要(唯一IP/Top端口/Top产品/Top国家)。' +
       '可用 save 参数把完整结果另存为 JSON 文件。',
     parameters: {
@@ -50,8 +51,9 @@ export function makeMapSearchTool(ctx) {
       properties: {
         platform: {
           type: 'string',
-          enum: ['fofa', 'shodan', 'hunter', 'zoomeye', 'quake', 'all'],
-          description: '测绘平台，必填; all=所有已配置平台联合搜索',
+          enum: ['fofa', 'shodan', 'hunter', 'zoomeye', 'quake', 'all', 'auto'],
+          description:
+            '测绘平台, 可选; 缺省或 auto/all 时对所有已填 Key 的平台联合搜索, 未配置自动跳过',
         },
         query: { type: 'string', description: '检索语句，使用该平台原生语法，必填' },
         page: { type: 'integer', description: '页码，从 1 开始，默认 1' },
@@ -83,16 +85,16 @@ export function makeMapSearchTool(ctx) {
         },
         save: { type: 'string', description: '可选: 把完整结果 JSON 写入该文件路径' },
       },
-      required: ['platform', 'query'],
+      required: ['query'],
     },
     output: JSON_OUTPUT,
     // 只读操作, 可与其他 map_* 工具并行 (多平台联合测绘)
     isConcurrencySafe: () => true,
     async execute(args) {
-      const platform = args.platform
+      const platform = args.platform || 'auto'
       try {
         let res
-        if (platform === 'all') {
+        if (platform === 'all' || platform === 'auto') {
           res = await searchUnion(ctx, args)
         } else {
           const key = await resolveKey(ctx, platform, args.key)

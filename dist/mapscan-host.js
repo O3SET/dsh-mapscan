@@ -212,6 +212,19 @@ async function resolveKey(ctx, platform, explicit) {
 }
 
 /**
+ * 返回候选平台中「已配置 Key」的 [platform, key] 列表 —— 未填写 Key 的平台自动跳过。
+ * 这是所有 "platform 缺省/auto" 能力的共用入口。
+ */
+async function configuredPlatforms(ctx, platforms) {
+  const entries = []
+  for (const p of platforms) {
+    const key = await resolveKey(ctx, p, undefined)
+    if (key) entries.push([p, key])
+  }
+  return entries
+}
+
+/**
  * map_set_keys 业务逻辑: 保存 / 删除 / 查看各平台 Key 配置状态。
  */
 async function setKeys(ctx, args) {
@@ -1081,11 +1094,8 @@ const ACCOUNTERS = {
 
 /** 全平台联合搜索; args.key 不适用 (各平台 Key 独立配置) */
 async function searchUnion(ctx, args) {
-  const entries = []
-  for (const p of PLATFORMS) {
-    const key = await resolveKey(ctx, p, undefined)
-    if (key) entries.push([p, key])
-  }
+  // 只使用已填写 API Key 的平台, 未填写的自动跳过
+  const entries = await configuredPlatforms(ctx, PLATFORMS)
   if (entries.length === 0) {
     throw new Error('所有平台都未配置 API Key, 无法联合搜索。请先 map_set_keys 或设置环境变量')
   }
@@ -1225,7 +1235,8 @@ function makeMapSearchTool(ctx) {
       'query 使用各平台原生语法，示例——fofa: app="nginx" && country="CN"; ' +
       'shodan: nginx port:443 country:CN; hunter: ip="1.1.1.1" || web.title="后台"; ' +
       'zoomeye: app:"nginx" +country:"CN"(+为与, 空格为或); quake: port:"80" AND country:"CN"。' +
-      'platform 传 "all" 时对所有已配置 Key 的平台并行联合搜索并按 ip:port 去重(消耗各平台配额)。' +
+      'platform 可省略: 缺省(或 auto/all)时对**所有已填写 API Key 的平台**并行联合搜索并按 ip:port 去重, ' +
+      '未配置 Key 的平台自动跳过并列入 skipped(只消耗已配置平台的配额)。' +
       'pages 参数可自动翻页合并(1~5, 仅单平台生效); 结果附带 summary 聚合摘要(唯一IP/Top端口/Top产品/Top国家)。' +
       '可用 save 参数把完整结果另存为 JSON 文件。',
     parameters: {
@@ -1233,8 +1244,9 @@ function makeMapSearchTool(ctx) {
       properties: {
         platform: {
           type: 'string',
-          enum: ['fofa', 'shodan', 'hunter', 'zoomeye', 'quake', 'all'],
-          description: '测绘平台，必填; all=所有已配置平台联合搜索',
+          enum: ['fofa', 'shodan', 'hunter', 'zoomeye', 'quake', 'all', 'auto'],
+          description:
+            '测绘平台, 可选; 缺省或 auto/all 时对所有已填 Key 的平台联合搜索, 未配置自动跳过',
         },
         query: { type: 'string', description: '检索语句，使用该平台原生语法，必填' },
         page: { type: 'integer', description: '页码，从 1 开始，默认 1' },
@@ -1266,16 +1278,16 @@ function makeMapSearchTool(ctx) {
         },
         save: { type: 'string', description: '可选: 把完整结果 JSON 写入该文件路径' },
       },
-      required: ['platform', 'query'],
+      required: ['query'],
     },
     output: JSON_OUTPUT,
     // 只读操作, 可与其他 map_* 工具并行 (多平台联合测绘)
     isConcurrencySafe: () => true,
     async execute(args) {
-      const platform = args.platform
+      const platform = args.platform || 'auto'
       try {
         let res
-        if (platform === 'all') {
+        if (platform === 'all' || platform === 'auto') {
           res = await searchUnion(ctx, args)
         } else {
           const key = await resolveKey(ctx, platform, args.key)
@@ -1321,56 +1333,105 @@ function makeMapSearchTool(ctx) {
 // ---- src/tools/map_ip_detail.js ----
 /**
  * map_ip_detail — 单 IP 测绘详情 (fofa / shodan), 可选 Shodan 蜜罐评分。
+ * platform 可省略: 缺省(或 auto)时对所有已配置 Key 的平台并行查询, 未配置自动跳过。
  * @module src/tools/map_ip_detail
  */
+
+/** 详情候选平台 */
+const DETAIL_CANDIDATES = ['fofa', 'shodan']
+
+/** 单平台详情 (含可选蜜罐评分) */
+async function detailOne(ctx, platform, ip, key, honeyscore) {
+  const res = await DETAILERS[platform](ctx, ip, key)
+  if (platform === 'shodan' && honeyscore === true) {
+    try {
+      res.honeyscore = await honeyscoreShodan(ctx, ip, key)
+    } catch (error) {
+      res.honeyscore_error = trunc(error && error.message ? error.message : String(error), 200)
+    }
+  }
+  return res
+}
 
 function makeMapIpDetailTool(ctx) {
   return defineTool({
     name: 'map_ip_detail',
     description:
-      '查询单个 IP 的主机测绘详情。platform 支持 fofa、shodan。' +
+      '查询单个 IP 的主机测绘详情。platform 支持 fofa、shodan, 可省略: ' +
+      '缺省(或 auto)时对所有已填写 API Key 的平台并行查询, 未配置 Key 的平台自动跳过并列入 skipped。' +
       '返回端口/协议列表、服务 banner、SSL 证书、历史记录(fofa)、CVE 漏洞(shodan vulns)等；' +
       'shodan 可加 honeyscore=true 附带蜜罐评分(需付费计划)。',
     parameters: {
       type: 'object',
       properties: {
-        platform: { type: 'string', enum: ['fofa', 'shodan'], description: '测绘平台' },
+        platform: {
+          type: 'string',
+          enum: ['fofa', 'shodan', 'auto'],
+          description: '测绘平台, 可选; 缺省或 auto 时对所有已填 Key 的平台执行, 未配置自动跳过',
+        },
         ip: { type: 'string', description: '目标 IP，如 1.1.1.1' },
         honeyscore: {
           type: 'boolean',
           description: '仅 shodan: true 时额外查询蜜罐评分(/labs/honeyscore, 需付费计划)',
         },
-        key: { type: 'string', description: '可选: 临时覆盖该平台的 API Key' },
+        key: {
+          type: 'string',
+          description: '可选: 临时覆盖指定平台的 API Key(仅显式单平台时生效)',
+        },
       },
-      required: ['platform', 'ip'],
+      required: ['ip'],
     },
     output: JSON_OUTPUT,
     // 只读操作, 可与其他 map_* 工具并行
     isConcurrencySafe: () => true,
     async execute(args) {
       try {
-        const key = await resolveKey(ctx, args.platform, args.key)
-        if (!key) {
+        const ip = String(args.ip)
+        const platform = args.platform || 'auto'
+
+        if (platform !== 'auto') {
+          const key = await resolveKey(ctx, platform, args.key)
+          if (!key) {
+            return {
+              ok: false,
+              platform,
+              error: `未配置 ${platform} 的 API Key。请先调用 map_set_keys 或设置环境变量`,
+            }
+          }
+          const res = await detailOne(ctx, platform, ip, key, args.honeyscore)
+          res.ok = true
+          return res
+        }
+
+        // 自动模式: 只使用已填写 Key 的平台, 未配置自动跳过
+        const entries = await configuredPlatforms(ctx, DETAIL_CANDIDATES)
+        if (entries.length === 0) {
           return {
             ok: false,
-            error:
-              `未配置 ${args.platform} 的 API Key。请先调用 map_set_keys 或设置环境变量 ` +
-              PRIMARY_REFS[args.platform],
+            error: 'fofa 与 shodan 都未配置 API Key。请先调用 map_set_keys 或设置环境变量',
           }
         }
-        const res = await DETAILERS[args.platform](ctx, String(args.ip), key)
-        if (args.platform === 'shodan' && args.honeyscore === true) {
-          try {
-            res.honeyscore = await honeyscoreShodan(ctx, String(args.ip), key)
-          } catch (error) {
-            res.honeyscore_error = trunc(
-              error && error.message ? error.message : String(error),
-              200,
-            )
-          }
-        }
-        res.ok = true
-        return res
+        const settled = await Promise.all(
+          entries.map(async ([p, key]) => {
+            try {
+              return {
+                platform: p,
+                ok: true,
+                result: await detailOne(ctx, p, ip, key, args.honeyscore),
+              }
+            } catch (error) {
+              return {
+                platform: p,
+                ok: false,
+                error: trunc(error && error.message ? error.message : String(error), 200),
+              }
+            }
+          }),
+        )
+        const platforms = {}
+        for (const s of settled) platforms[s.platform] = s.ok ? s.result : { error: s.error }
+        const skipped = DETAIL_CANDIDATES.filter((p) => !platforms[p])
+        return { ok: true, platform: 'auto', ip, platforms, skipped }
       } catch (error) {
         return toolError('map_ip_detail 失败', error)
       }
@@ -1382,19 +1443,28 @@ function makeMapIpDetailTool(ctx) {
 // ---- src/tools/map_stats.js ----
 /**
  * map_stats — 聚合统计 (fofa 字段分布 / shodan 总数+facets)。
+ * platform 可省略: 缺省(或 auto)时对所有已配置 Key 的平台并行统计, 未配置自动跳过。
  * @module src/tools/map_stats
  */
+
+/** 统计候选平台 */
+const STATS_CANDIDATES = ['fofa', 'shodan']
 
 function makeMapStatsTool(ctx) {
   return defineTool({
     name: 'map_stats',
     description:
       '聚合统计。fofa: 按 fields(逗号分隔, 最多 5 个, 默认 title)统计命中数量分布; ' +
-      'shodan: 返回 query 的总命中数，可选 facets(如 org,country,port)。',
+      'shodan: 返回 query 的总命中数，可选 facets(如 org,country,port)。' +
+      'platform 可省略: 缺省(或 auto)时对所有已填写 API Key 的平台并行统计, 未配置自动跳过并列入 skipped。',
     parameters: {
       type: 'object',
       properties: {
-        platform: { type: 'string', enum: ['fofa', 'shodan'], description: '测绘平台' },
+        platform: {
+          type: 'string',
+          enum: ['fofa', 'shodan', 'auto'],
+          description: '测绘平台, 可选; 缺省或 auto 时对所有已填 Key 的平台执行, 未配置自动跳过',
+        },
         query: { type: 'string', description: '检索语句，必填' },
         fields: {
           type: 'string',
@@ -1405,27 +1475,59 @@ function makeMapStatsTool(ctx) {
           type: 'string',
           description: '仅 shodan: 逗号分隔的聚合字段，如 org,country,port',
         },
-        key: { type: 'string', description: '可选: 临时覆盖该平台的 API Key' },
+        key: {
+          type: 'string',
+          description: '可选: 临时覆盖指定平台的 API Key(仅显式单平台时生效)',
+        },
       },
-      required: ['platform', 'query'],
+      required: ['query'],
     },
     output: JSON_OUTPUT,
     // 只读操作, 可与其他 map_* 工具并行
     isConcurrencySafe: () => true,
     async execute(args) {
       try {
-        const key = await resolveKey(ctx, args.platform, args.key)
-        if (!key) {
+        const platform = args.platform || 'auto'
+
+        if (platform !== 'auto') {
+          const key = await resolveKey(ctx, platform, args.key)
+          if (!key) {
+            return {
+              ok: false,
+              platform,
+              error: `未配置 ${platform} 的 API Key。请先调用 map_set_keys 或设置环境变量`,
+            }
+          }
+          const res = await STATSERS[platform](ctx, args, key)
+          res.ok = true
+          return res
+        }
+
+        // 自动模式: 只使用已填写 Key 的平台, 未配置自动跳过
+        const entries = await configuredPlatforms(ctx, STATS_CANDIDATES)
+        if (entries.length === 0) {
           return {
             ok: false,
-            error:
-              `未配置 ${args.platform} 的 API Key。请先调用 map_set_keys 或设置环境变量 ` +
-              PRIMARY_REFS[args.platform],
+            error: 'fofa 与 shodan 都未配置 API Key。请先调用 map_set_keys 或设置环境变量',
           }
         }
-        const res = await STATSERS[args.platform](ctx, args, key)
-        res.ok = true
-        return res
+        const settled = await Promise.all(
+          entries.map(async ([p, key]) => {
+            try {
+              return { platform: p, ok: true, result: await STATSERS[p](ctx, args, key) }
+            } catch (error) {
+              return {
+                platform: p,
+                ok: false,
+                error: trunc(error && error.message ? error.message : String(error), 200),
+              }
+            }
+          }),
+        )
+        const platforms = {}
+        for (const s of settled) platforms[s.platform] = s.ok ? s.result : { error: s.error }
+        const skipped = STATS_CANDIDATES.filter((p) => !platforms[p])
+        return { ok: true, platform: 'auto', query: args.query, platforms, skipped }
       } catch (error) {
         return toolError('map_stats 失败', error)
       }
@@ -1437,6 +1539,7 @@ function makeMapStatsTool(ctx) {
 // ---- src/tools/map_account.js ----
 /**
  * map_account — 各平台账户与配额查询。
+ * platform 可省略: 缺省(或 auto)时对所有已配置 Key 的平台并行查询, 未配置自动跳过。
  * @module src/tools/map_account
  */
 
@@ -1446,36 +1549,69 @@ function makeMapAccountTool(ctx) {
     description:
       '查询平台账户信息与配额: fofa(fcoin/F点/vip)、shodan(plan/query_credits/scan_credits)、' +
       'hunter(消耗与剩余积分)、zoomeye(plan/resources)、quake(credit/月度剩余)。' +
+      'platform 可省略: 缺省(或 auto)时对所有已填写 API Key 的平台并行查询, 未配置自动跳过并列入 skipped; ' +
       'hunter 通过一次最小搜索读取配额(消耗极少量积分)。',
     parameters: {
       type: 'object',
       properties: {
         platform: {
           type: 'string',
-          enum: ['fofa', 'shodan', 'hunter', 'zoomeye', 'quake'],
-          description: '测绘平台',
+          enum: ['fofa', 'shodan', 'hunter', 'zoomeye', 'quake', 'auto'],
+          description: '测绘平台, 可选; 缺省或 auto 时对所有已填 Key 的平台执行, 未配置自动跳过',
         },
-        key: { type: 'string', description: '可选: 临时覆盖该平台的 API Key' },
+        key: {
+          type: 'string',
+          description: '可选: 临时覆盖指定平台的 API Key(仅显式单平台时生效)',
+        },
       },
-      required: ['platform'],
+      required: [],
     },
     output: JSON_OUTPUT,
     // 只读操作, 可与其他 map_* 工具并行
     isConcurrencySafe: () => true,
     async execute(args) {
       try {
-        const key = await resolveKey(ctx, args.platform, args.key)
-        if (!key) {
+        const platform = args.platform || 'auto'
+
+        if (platform !== 'auto') {
+          const key = await resolveKey(ctx, platform, args.key)
+          if (!key) {
+            return {
+              ok: false,
+              platform,
+              error: `未配置 ${platform} 的 API Key。请先调用 map_set_keys 或设置环境变量`,
+            }
+          }
+          const res = await ACCOUNTERS[platform](ctx, key)
+          res.ok = true
+          return res
+        }
+
+        // 自动模式: 只使用已填写 Key 的平台, 未配置自动跳过
+        const entries = await configuredPlatforms(ctx, PLATFORMS)
+        if (entries.length === 0) {
           return {
             ok: false,
-            error:
-              `未配置 ${args.platform} 的 API Key。请先调用 map_set_keys 或设置环境变量 ` +
-              PRIMARY_REFS[args.platform],
+            error: '所有平台都未配置 API Key。请先调用 map_set_keys 或设置环境变量',
           }
         }
-        const res = await ACCOUNTERS[args.platform](ctx, key)
-        res.ok = true
-        return res
+        const settled = await Promise.all(
+          entries.map(async ([p, key]) => {
+            try {
+              return { platform: p, ok: true, result: await ACCOUNTERS[p](ctx, key) }
+            } catch (error) {
+              return {
+                platform: p,
+                ok: false,
+                error: trunc(error && error.message ? error.message : String(error), 200),
+              }
+            }
+          }),
+        )
+        const platforms = {}
+        for (const s of settled) platforms[s.platform] = s.ok ? s.result : { error: s.error }
+        const skipped = PLATFORMS.filter((p) => !platforms[p])
+        return { ok: true, platform: 'auto', platforms, skipped }
       } catch (error) {
         return toolError('map_account 失败', error)
       }

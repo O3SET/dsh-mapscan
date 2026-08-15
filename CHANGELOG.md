@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-15
+
+### Added
+
+- **platform 参数全部可选, 缺省自动使用已填 Key 的平台**: `map_search`/`map_ip_detail`/`map_stats`/`map_account` 省略 platform(或传 auto)时, 只对已填写 API Key 的平台并行执行, 未配置的平台自动跳过并列入 `skipped`
+- `configuredPlatforms()` 共用帮助函数（credentials.js）：已配置平台发现只依赖实际填写的 Key
+
+### Changed
+
+- `map_search`/`map_ip_detail`/`map_stats`/`map_account` 的 `platform` 移出必填字段（enum 增加 `auto`）
+- 显式指定未配置平台时的错误提示保持可操作（引导 map_set_keys/环境变量）
+- 测试 66 → 73 例（缺省平台联合/单Key/双Key/无Key 各路径）
+
 ## [1.3.1] - 2026-08-15
 
 ### Changed
