@@ -62,9 +62,10 @@ DSH 动态插件运行在受限 VM 中（详见运行时源码）：
 
 1. 更新 CHANGELOG（`## [Unreleased]` → 新版本节）
 2. `npm version <patch|minor|major>`（自动打 tag）
-3. `npm run check && npm run build`，提交 dist
+3. `npm run check`（含构建；pre-commit 钩子会保证 dist 随源码同步提交）
 4. GitHub Release 说明引用 CHANGELOG
 5. DSH 侧：以新 dist 内容 `cordis_define`(existing) + `cordis_run`(update) 升级运行中的插件
+6. 生态侧：按 [docs/COMPLIANCE.md](COMPLIANCE.md#六发布清单维护者推送后执行) 执行 topic / 收录 PR / badge 清单
 
 ## 常见坑
 

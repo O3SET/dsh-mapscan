@@ -8,13 +8,15 @@
 
 ## 开发环境
 
-- Node.js ≥ 18（建议 20，见 [.nvmrc](.nvmrc)）
-- 克隆后执行 `npm install`（仅安装 eslint / prettier 开发依赖）
+- Node.js ≥ 22.19（见 [.nvmrc](.nvmrc)，与官方 DSH 引擎下限对齐）
+- 克隆后执行 `npm install`（eslint / prettier / husky / lint-staged 开发依赖，并自动安装 Git 钩子）
 
 ```bash
 npm install
 npm run check   # lint + format:check + build + test，PR 前必须全部通过
 ```
+
+- pre-commit 钩子：对暂存文件跑 prettier/eslint 增量检查，并在改动 `src/**` 时重建 dist 保持同步；CI 负责全量门禁（Node 22/24/26 矩阵）
 
 ## 分支与提交规范
 
@@ -27,12 +29,25 @@ npm run check   # lint + format:check + build + test，PR 前必须全部通过
   docs(readme): 补充 hunter 语法示例
   ```
 
+- 代码中的已知问题按官方三级标记（选与紧急程度匹配的标签）：
+  - `FIXME`：阻塞发布的问题（发布版本不应包含未解决的 FIXME）
+  - `TODO`：应尽快修复，等资源到位即处理
+  - `XXX`：也许某天会修，优先级最低，不作承诺
+
 ## PR 流程
 
 1. 从 `main` 切出功能分支
 2. 修改 `src/**` 源码；纯函数请补充 `test/unit` 测试，工具行为请补充 `test/integration` 测试
 3. 本地跑 `npm run check`，并在 CHANGELOG.md 的 `## [Unreleased]` 下登记变更
 4. 提交 PR，按 [PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md) 填写
+
+## 生态收录提交
+
+dsh-plugin 生态（官方 + 精选目录 + radar）的规范与对照见 [docs/COMPLIANCE.md](docs/COMPLIANCE.md)：
+
+1. 仓库公开并添加 `dsh-plugin` topic（radar 每 8 小时自动扫描收录）
+2. 精选目录（awesome-dsh-plugin）PR：`README.md` 与 `README.zh.md` 各加一行 `- [mapscan-dsh](链接) — 一句话说明`
+3. radar 人工目录 PR：附「测试环境与结果」材料（模板见 docs/COMPLIANCE.md 第四节）
 
 ## 重要约定
 

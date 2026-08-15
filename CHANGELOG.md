@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-15
+
+### Changed
+
+- 对齐 dsh-plugin 生态规范：README 按收录目录 9 章节重构（Compatibility / Uninstall / Configuration / Permissions & data / Troubleshooting）
+- `package.json` 补齐 `main` / `exports` / `dsh.entry` 集成入口，`dependencies: {}` 显式声明零运行时依赖，engines 对齐官方下限 `>=22.19`
+- CI 矩阵更新为 Node 22/24/26（对齐官方 deepseek-harness）
+
+### Added
+
+- `docs/COMPLIANCE.md`：dsh-plugin 生态开发/提交规范调研、最低收录条件对照表、收录提交材料模板
+- husky + lint-staged pre-commit 钩子（增量 lint/format + dist 同步）
+- CONTRIBUTING 增加 TODO 三级标记规范与生态收录提交流程
+
 ## [1.0.0] - 2026-08-15
 
 ### Added
