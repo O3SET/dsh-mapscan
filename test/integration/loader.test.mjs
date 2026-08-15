@@ -36,7 +36,7 @@ function makeRealCtx() {
 test('Loader 变体: 默认导出插件对象且声明 shell 依赖', async () => {
   const plugin = await loadLoaderPlugin()
   assert.equal(typeof plugin.apply, 'function')
-  assert.deepEqual(plugin.inject, ['shell'])
+  assert.deepEqual(plugin.inject, ['shell', 'tools'])
 })
 
 test('Loader 变体: 经 ctx.tools.register 注册全部 6 个工具', async () => {

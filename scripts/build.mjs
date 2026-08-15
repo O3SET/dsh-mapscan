@@ -59,11 +59,8 @@ const ESM_BANNER = [
   '// ============================================================',
   '// MapScan — 网络空间测绘综合插件 (FOFA / Shodan / Hunter / ZoomEye / Quake)',
   '// 本文件由 scripts/build.mjs 自动生成, 请勿手工编辑; 修改请编辑 src/** 后重新构建。',
-  '// 用法 (持久化安装): 在 ~/.dsh/profiles/<profile>/cordis.patch.yml 添加',
-  '//   - insert:',
-  '//       - id: mapscan',
-  '//         name: file:///<本文件绝对路径>',
-  '// 或运行 node scripts/install.mjs 一键安装 (HMR 自动生效或重启 DSH)。',
+  '// 用法 (持久化安装): 运行 node scripts/install.mjs 一键安装 —— 把本仓库作为本地',
+  '// link 包装进 DSH profile 工作区, 并在补丁层登记 name: mapscan-dsh 行, 重启 DSH 即生效。',
   '// ============================================================',
   '',
 ].join('\n')

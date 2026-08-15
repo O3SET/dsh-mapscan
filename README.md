@@ -58,15 +58,15 @@ node dsh-mapscan\scripts\install.mjs
 # 重启 DSH 进程（或等待长驻界面 HMR 自动重载）→ 6 个 map_* 工具全局可用
 ```
 
-`install.mjs` 只做一件事：向你的 DSH profile 补丁层
-（`~/.dsh/profiles/<profile>/cordis.patch.yml`）追加一行 Loader 补丁，
-指向仓库 `dist/mapscan-plugin.mjs`（自包含 ESM，无任何外部依赖），
-由 Cordis Loader 在启动时加载 —— **不再需要手工粘贴任何代码**。
+`install.mjs` 只做两件事（**不依赖任何包管理器**）：在 DSH profile 工作区创建
+`node_modules/mapscan-dsh` 指向本仓库的链接（Windows junction 支持跨盘符），并向补丁层
+（`~/.dsh/profiles/<profile>/cordis.patch.yml`）登记 Loader 行 `name: mapscan-dsh` ——
+由 Cordis Loader 在启动时加载，插件清单中显示为 **mapscan-dsh**。
 
 - 非默认 profile：`$env:DSH_PROFILE="你的profile"; node scripts/install.mjs`
-- 卸载：`node scripts/uninstall.mjs`（移除补丁行后重启）
-- 升级：`git pull` 后**无需任何操作**（补丁行指向仓库文件，重启即用新版；重新构建后见 Development）
-- 幂等：重复执行安全（检测到 `id: mapscan` 自动跳过）
+- 卸载：`node scripts/uninstall.mjs`（移除补丁行与链接后重启）
+- 升级：`git pull` 后**无需任何操作**（链接指向仓库文件，重启即用新版；重新构建后见 Development）
+- 幂等：重复执行安全（自动替换旧行/旧链接）
 
 **开发/预览安装（动态插件，会话级，可选）**
 

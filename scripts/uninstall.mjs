@@ -1,57 +1,60 @@
 #!/usr/bin/env node
 /**
- * MapScan 卸载: 从 DSH profile 补丁层移除 id=mapscan 的 insert 补丁块。
+ * MapScan 卸载: 移除补丁层 mapscan 行与 node_modules 链接。
  * 用法:
  *   node scripts/uninstall.mjs
  *   DSH_PROFILE=xxx node scripts/uninstall.mjs
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh')
 const PROFILE = process.env.DSH_PROFILE || 'web'
-const patchPath = join(DSH_HOME, 'profiles', PROFILE, 'cordis.patch.yml')
+const profileDir = join(DSH_HOME, 'profiles', PROFILE)
+const patchPath = join(profileDir, 'cordis.patch.yml')
+const linkPath = join(profileDir, 'node_modules', 'mapscan-dsh')
 
-if (!existsSync(patchPath)) {
-  console.error(`✗ 未找到 profile 补丁层: ${patchPath}`)
-  process.exit(1)
-}
-
-const doc = readFileSync(patchPath, 'utf8')
-if (!/^\s*-?\s*id:\s*mapscan\s*$/m.test(doc)) {
-  console.log('✔ MapScan 未安装, 无需卸载')
-  process.exit(0)
-}
-
-// 移除包含 id: mapscan 的 insert 补丁块 (从块首 "- insert:" 到下一个顶层 "- " 或文件尾)
-const lines = doc.split('\n')
-const out = []
-let skipping = false
-for (let i = 0; i < lines.length; i++) {
-  const line = lines[i]
-  const isBlockHead = /^\s*- insert:\s*$/.test(line)
-  const isTopEntry = /^-\s/.test(line) && !isBlockHead
-  if (skipping) {
-    if (isTopEntry) {
-      skipping = false
-    } else {
-      continue
+// ---- 1. 移除补丁行 ----
+if (existsSync(patchPath)) {
+  const doc = readFileSync(patchPath, 'utf8')
+  const lines = doc.split('\n')
+  const kept = []
+  let skipping = false
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const isBlockHead = /^\s*- insert:\s*$/.test(line)
+    const isTopEntry = /^-\s/.test(line) && !isBlockHead
+    if (skipping) {
+      if (isTopEntry) {
+        skipping = false
+      } else {
+        continue
+      }
     }
-  }
-  if (isBlockHead) {
-    // 向后看 6 行内是否含 id: mapscan
-    const slice = lines.slice(i, i + 6).join('\n')
-    if (/^\s*-?\s*id:\s*mapscan\s*$/m.test(slice)) {
-      skipping = true
-      continue
+    if (isBlockHead) {
+      const slice = lines.slice(i, i + 6).join('\n')
+      if (/^\s*-?\s*id:\s*mapscan\s*$/m.test(slice)) {
+        skipping = true
+        continue
+      }
     }
+    kept.push(line)
   }
-  out.push(line)
+  let next = kept.join('\n').trimEnd()
+  if (next.trim().length === 0) next = '[]'
+  writeFileSync(patchPath, `${next.trimEnd()}\n`, 'utf8')
+  console.log(`✔ 已移除补丁行: ${patchPath}`)
 }
 
-let next = out.join('\n').trimEnd() + '\n'
-if (next.trim().length === 0) next = '[]\n'
-writeFileSync(patchPath, next, 'utf8')
-console.log(`✔ MapScan 已卸载: ${patchPath}`)
-console.log('  生效方式: HMR 自动重载, 或重启 DSH 进程。')
+// ---- 2. 移除链接 (只删链接本身) ----
+try {
+  if (lstatSync(linkPath).isSymbolicLink()) {
+    unlinkSync(linkPath)
+    console.log(`✔ 已移除链接: ${linkPath}`)
+  }
+} catch {
+  // 不存在或已非链接, 忽略
+}
+
+console.log('✔ MapScan 已卸载。生效方式: 重启 DSH 进程。')

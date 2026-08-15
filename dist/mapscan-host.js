@@ -1615,7 +1615,8 @@ function makeTools(ctx) {
 /** MapScan 插件对象 */
 const plugin = {
   name: 'MapScan 网络空间测绘',
-  inject: ['shell'],
+  // shell: HTTP 主通道; tools: 注册工具 (Loader 持久化路径经 ctx.tools.register, 必须显式注入)
+  inject: ['shell', 'tools'],
   apply(ctx) {
     for (const tool of makeTools(ctx)) {
       // 每个注册 disposer 归属当前 Plugin Fiber, stop/update 时自动回收

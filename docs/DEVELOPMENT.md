@@ -38,7 +38,7 @@ DSH 动态插件运行在受限 VM 中（详见运行时源码）：
 | 任意 HTTP（Header/POST）         | 部分        | `ctx.shell`（win32 为 pwsh 执行器）驱动 `curl.exe` |
 | 工具注册                         | ✅          | `harness.defineTool` + `harness.registerTool`      |
 
-插件返回对象需声明 `inject`（本插件硬依赖 `shell`）；`credentials`/`web`/`fs` 以 `ctx.get()` 可选读取。
+插件返回对象需声明 `inject`（本插件硬依赖 `shell` 与 `tools`）；`credentials`/`web`/`fs` 以 `ctx.get()` 可选读取。
 
 ## 分层职责
 

@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-08-15
+
+### Changed
+
+- 持久化安装改为**本地包链接**：`install.mjs` 在 profile 工作区创建 `node_modules/mapscan-dsh` 链接（Windows junction 支持跨盘符，不依赖任何包管理器），补丁层行名改为 `mapscan-dsh` —— 插件清单显示包名而非 file:// 路径
+- `package.json` 的 `main`/`exports` 指向 `dist/mapscan-plugin.mjs`（Loader 入口，default 导出）
+- 插件 `inject` 增加 `tools`（Loader 路径经 `ctx.tools.register` 注册，显式声明硬依赖）
+
+### Fixed
+
+- Windows 下 `spawnSync('pnpm')` 无法直接执行 `.cmd` 的问题（改由 Node 原生 `symlinkSync` 建链，彻底移除包管理器依赖）
+
 ## [1.3.0] - 2026-08-15
 
 ### Added
