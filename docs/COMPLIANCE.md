@@ -91,3 +91,24 @@ radar 判定层级：**L0 发现（topic）→ L1 清单（package.json/入口�
 2. 确认 CI 徽章生效，取消 README 顶部注释中的徽章行注释
 3. 按第四节材料在 radar 提交 PR（或仅等待 8h 自动收录）
 4. 按第三节在 awesome-dsh-plugin 提交精选 PR，收录后挂 badge
+
+## 七、收录状态自检（2026-08-15 实况）
+
+| 检查点         | 方式                                                                                                                                            | 本仓库状态                                                                       |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| topic 信号     | 仓库主页 About 区 / API `repos/O3SET/dsh-mapscan`.topics                                                                                        | ✅ 已有 `dsh-plugin`                                                             |
+| radar 自动索引 | 打开 [radar 首页](https://github.com/AdamPlatin123/awesome-dsh-plugins)「当前生态快照」的**完整索引**（`reports/<日期>/`），Ctrl+F 搜 `mapscan` | ⏳ 最新快照 `2026-08-15 05:36`（早于 topic 添加时间），下一轮扫描（每 6h）后生效 |
+| radar 人工精选 | [PLUGINS.md](https://github.com/AdamPlatin123/awesome-dsh-plugins/blob/main/PLUGINS.md) 搜索                                                    | ✗ 未收录（需 PR）                                                                |
+| 精选列表       | [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) README/README.zh 搜索                                            | ✗ 未收录（需 PR）                                                                |
+| 第三方索引     | [dshfind.com](https://dshfind.com) 搜 `mapscan-dsh`                                                                                             | 待收录后可查                                                                     |
+
+**待提交 PR 文本**（网页 fork & edit 两文件即可，按第三节流程）：
+
+- `awesome-dsh-plugin/README.md` 的 **Tools & Capabilities** 分类加一行：
+  `- [O3SET/dsh-mapscan](https://github.com/O3SET/dsh-mapscan) - Unified search across FOFA / Shodan / Hunter / ZoomEye / Quake with normalized results, auto-skip of unconfigured platforms, and one-command persistent install.`
+- `awesome-dsh-plugin/README.zh.md` 对应分类加一行：
+  `- [O3SET/dsh-mapscan](https://github.com/O3SET/dsh-mapscan) - 五平台网络空间测绘综合查询：统一/联合搜索、资产详情、聚合统计、账户配额，未配置平台自动跳过，一键持久化安装。`
+- radar `PLUGINS.md`（按该仓库 PR 模板 + 第四节「测试环境与结果」材料提交）加一行：
+  `- [O3SET/dsh-mapscan](https://github.com/O3SET/dsh-mapscan) | 社区 | 待实测 | FOFA/Shodan/Hunter/ZoomEye/Quake 五平台测绘综合查询，platform 缺省自动联合已配置平台，未配置自动跳过`
+
+> 注意：radar「收录 ≠ 兼容 ≠ 运行可用 ≠ 安全审计」，收录后其 K8s 集群会自动跑运行级实测（L4），结果出现在当日报告中。
