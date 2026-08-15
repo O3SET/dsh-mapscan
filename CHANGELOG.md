@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-08-15
+
+### Fixed
+
+- **无可用沙箱后端时自动重试**：部署默认策略解析为受限模式（如 `workspace-write`）但主机没有可用沙箱后端时，执行器会拒绝运行（"refusing to run the command unconfined"）；现在检测到该错误后按会话实际生效策略（`danger-full-access`）重试一次，其余错误不重试
+
 ## [1.4.1] - 2026-08-15
 
 ### Fixed

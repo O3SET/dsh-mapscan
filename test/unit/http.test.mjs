@@ -58,6 +58,42 @@ test('curlJson 策略服务 resolve 抛错时回落全访问', async () => {
   assert.equal(shell.calls[0].sandboxPolicy.mode, 'danger-full-access')
 })
 
+test('curlJson 无可用沙箱后端时按全访问策略重试一次', async () => {
+  const calls = []
+  const shell = {
+    run: async (req) => {
+      calls.push(req)
+      if (calls.length === 1) {
+        throw new Error(
+          'sandbox mode "workspace-write" is requested but no sandbox backend is usable on this host; refusing to run the command unconfined',
+        )
+      }
+      return {
+        exitCode: 0,
+        stdout: { text: '{"ok":1}\n__MAPSCAN_HTTP__:200' },
+        stderr: { text: '' },
+      }
+    },
+  }
+  const sp = { resolve: async () => ({ mode: 'workspace-write', workspaceRoot: 'D:\\ws' }) }
+  const ctx = { shell, get: (name) => (name === 'sandboxPolicy' ? sp : undefined) }
+  const res = await curlJson(ctx, 'https://x.test/', {})
+  assert.deepEqual(res.data, { ok: 1 })
+  assert.equal(calls.length, 2)
+  assert.equal(calls[0].sandboxPolicy.mode, 'workspace-write')
+  assert.equal(calls[1].sandboxPolicy.mode, 'danger-full-access')
+})
+
+test('curlJson 其它 shell 错误不重试', async () => {
+  const shell = {
+    run: async () => {
+      throw new Error('some unrelated failure')
+    },
+  }
+  const ctx = { shell, get: () => undefined }
+  await assert.rejects(curlJson(ctx, 'https://x.test/', {}), /some unrelated failure/)
+})
+
 test('curlJson POST 携带 --data-binary 与自定义头', async () => {
   const shell = mockShell('{"code":0}\n__MAPSCAN_HTTP__:200')
   await curlJson({ shell }, 'https://quake.test/api', {

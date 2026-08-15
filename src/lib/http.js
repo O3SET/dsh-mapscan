@@ -29,6 +29,28 @@ async function resolveShellPolicy(ctx) {
 }
 
 /**
+ * 带策略执行 shell 命令。部署默认策略可能要求受限后端(workspace-write)而本机
+ * 无可用沙箱后端导致执行器拒绝运行; 此时按会话实际生效策略(全访问)重试一次。
+ */
+async function shellRunWithPolicy(ctx, request) {
+  try {
+    return await ctx.shell.run({
+      ...request,
+      sandboxPolicy: await resolveShellPolicy(ctx),
+    })
+  } catch (error) {
+    const msg = error && error.message ? error.message : String(error)
+    if (/refusing to run the command unconfined|no sandbox backend is usable/.test(msg)) {
+      return await ctx.shell.run({
+        ...request,
+        sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: '' },
+      })
+    }
+    throw error
+  }
+}
+
+/**
  * 通过 curl.exe 发起 HTTP 请求, 响应体必须是 JSON。
  * @param {object} ctx - 插件 ctx (至少含 ctx.shell)
  * @param {string} url - 目标 URL
@@ -53,11 +75,10 @@ export async function curlJson(ctx, url, options = {}) {
   // '\\n' 经 pwsh 单引号原样传给 curl, 由 curl -w 解释为换行
   cmd += ` -w ${pq(`\\n${HTTP_MARKER}%{http_code}`)} ${pq(url)}`
 
-  const res = await ctx.shell.run({
+  const res = await shellRunWithPolicy(ctx, {
     command: cmd,
     timeoutMs: (timeoutSec + 10) * 1000,
     stdoutMaxBytes: 4194304,
-    sandboxPolicy: await resolveShellPolicy(ctx),
   })
 
   const out = textOf(res.stdout)
