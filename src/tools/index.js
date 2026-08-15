@@ -3,6 +3,7 @@
  * @module src/tools
  */
 import { makeMapAccountTool } from './map_account.js'
+import { makeMapDnsTool } from './map_dns.js'
 import { makeMapIpDetailTool } from './map_ip_detail.js'
 import { makeMapSearchTool } from './map_search.js'
 import { makeMapSetKeysTool } from './map_set_keys.js'
@@ -15,6 +16,7 @@ export function makeTools(ctx) {
     makeMapIpDetailTool(ctx),
     makeMapStatsTool(ctx),
     makeMapAccountTool(ctx),
+    makeMapDnsTool(ctx),
     makeMapSetKeysTool(ctx),
   ]
 }

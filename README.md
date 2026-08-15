@@ -1,7 +1,7 @@
 # MapScan DSH
 
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![version](https://img.shields.io/badge/version-1.0.1-brightgreen)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-1.1.0-brightgreen)](CHANGELOG.md)
 [![node](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=node.js)](package.json)
 [![CI](https://github.com/O3SET/dsh-mapscan/actions/workflows/ci.yml/badge.svg)](https://github.com/O3SET/dsh-mapscan/actions/workflows/ci.yml)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -18,20 +18,22 @@
 ## Overview
 
 五个国内主流网络空间测绘平台（FOFA / Shodan / 鹰图Hunter / ZoomEye / Quake）语法各异、鉴权方式各异。
-MapScan 把它们封装成 5 个统一的动态工具，输出**归一化结果**（ip/端口/协议/域名/标题/banner/证书/地理/组件/风险），
+MapScan 把它们封装成 6 个统一的动态工具，输出**归一化结果**（ip/端口/协议/域名/标题/banner/证书/地理/组件/风险），
 并内置 API Key 持久化管理，让渗透测试、SRC 资产梳理、攻击面测绘可以直接用自然语言驱动。
 
-| 工具            | 说明                                                                   |
-| --------------- | ---------------------------------------------------------------------- |
-| `map_search`    | 五平台统一搜索，支持分页、`save` 落盘、平台专属过滤参数                |
-| `map_ip_detail` | 单 IP 测绘详情：FOFA 端口+历史记录、Shodan 服务列表+SSL 证书+CVE vulns |
-| `map_stats`     | 聚合统计：FOFA 字段分布、Shodan 总数+facets                            |
-| `map_account`   | 各平台账户与配额（fcoin/F点/query_credits/剩余积分/credit）            |
-| `map_set_keys`  | API Key 持久化管理（凭证库 / 环境变量，支持查看与删除）                |
+| 工具            | 说明                                                                                               |
+| --------------- | -------------------------------------------------------------------------------------------------- |
+| `map_search`    | 五平台统一搜索，支持分页、`save` 落盘、平台专属过滤参数                                            |
+| `map_ip_detail` | 单 IP 测绘详情：FOFA 端口+历史记录、Shodan 服务列表+SSL 证书+CVE vulns；可选 `honeyscore` 蜜罐评分 |
+| `map_stats`     | 聚合统计：FOFA 字段分布、Shodan 总数+facets                                                        |
+| `map_account`   | 各平台账户与配额（fcoin/F点/query_credits/剩余积分/credit）                                        |
+| `map_dns`       | Shodan DNS 批量解析（域名 → IP 映射，不消耗查询额度）                                              |
+| `map_set_keys`  | API Key 持久化管理（凭证库 / 环境变量，支持查看与删除）                                            |
 
 - **零运行时依赖**：插件本体只使用 DSH 沙箱能力（`ctx.shell` 驱动的 curl + `web.fetch` 回退），无任何 npm 运行时依赖
 - **沙箱友好**：支持自定义 Header（ZoomEye `API-KEY`）与 POST（Quake `X-QuakeToken`）
-- **可测试**：模块化 ESM 源码 + node:test 单元/集成测试（39 例）+ 零依赖构建流水线
+- **可测试**：模块化 ESM 源码 + node:test 单元/集成测试（46 例）+ 零依赖构建流水线
+- **可并行**：只读工具声明 `isConcurrencySafe`，多平台联合测绘可并行发起
 
 ## Compatibility
 

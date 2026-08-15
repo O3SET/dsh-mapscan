@@ -24,6 +24,7 @@ test('curlJson 解析 JSON 与 HTTP 状态标记', async () => {
   assert.equal(res.status, 200)
   assert.deepEqual(res.data, { total: 2, matches: [] })
   assert.match(shell.calls[0].command, /curl\.exe -s -S/)
+  assert.match(shell.calls[0].command, /--retry 1 --retry-delay 1 --retry-connrefused/)
   assert.match(shell.calls[0].command, /-H 'Accept: application\/json'/)
   assert.match(
     shell.calls[0].command,
@@ -60,6 +61,36 @@ test('curlJson 非 JSON 响应抛出带状态码错误', async () => {
 test('curlJson 空响应携带 stderr 信息', async () => {
   const shell = mockShell('', 'connection refused')
   await assert.rejects(curlJson({ shell }, 'https://x.test/', {}), /connection refused/)
+})
+
+test('curlJson 空响应且 shell 超时时正交上报 timedOut', async () => {
+  const shell = {
+    calls: [],
+    run: async (req) => {
+      shell.calls.push(req)
+      return {
+        exitCode: null,
+        timedOut: true,
+        aborted: false,
+        stdout: { text: '' },
+        stderr: { text: '' },
+      }
+    },
+  }
+  await assert.rejects(curlJson({ shell }, 'https://x.test/', {}), /命令超时/)
+})
+
+test('curlJson 空响应且 shell 被中止时正交上报 aborted', async () => {
+  const shell = {
+    run: async () => ({
+      exitCode: null,
+      timedOut: false,
+      aborted: true,
+      stdout: { text: '' },
+      stderr: { text: '' },
+    }),
+  }
+  await assert.rejects(curlJson({ shell }, 'https://x.test/', {}), /命令被中止/)
 })
 
 test('curlJson 无标记且退出码为 0 时视为 200', async () => {

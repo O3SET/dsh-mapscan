@@ -26,6 +26,8 @@ export function makeMapAccountTool(ctx) {
       required: ['platform'],
     },
     output: JSON_OUTPUT,
+    // 只读操作, 可与其他 map_* 工具并行
+    isConcurrencySafe: () => true,
     async execute(args) {
       try {
         const key = await resolveKey(ctx, args.platform, args.key)

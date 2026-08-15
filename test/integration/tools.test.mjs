@@ -21,6 +21,7 @@ function makeHarness() {
         description: options.description,
         // 真实运行时会把 parameters 归一化并宿主化 (JSON round-trip), 此处保持一致
         parameters: JSON.parse(JSON.stringify(options.parameters)),
+        isConcurrencySafe: options.isConcurrencySafe,
         execute: async (args) => JSON.parse(JSON.stringify(await options.execute(args))),
       }
     },
@@ -322,11 +323,23 @@ test('插件注册全部 5 个工具', async () => {
   plugin.apply(makeCtx({ shell: makeShell([]) }))
   assert.deepEqual([...harness.tools.keys()].sort(), [
     'map_account',
+    'map_dns',
     'map_ip_detail',
     'map_search',
     'map_set_keys',
     'map_stats',
   ])
+})
+
+test('只读工具声明 isConcurrencySafe, map_set_keys 保持独占', async () => {
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell: makeShell([]) }))
+  for (const name of ['map_search', 'map_ip_detail', 'map_stats', 'map_account', 'map_dns']) {
+    const tool = harness.tools.get(name)
+    assert.equal(typeof tool.isConcurrencySafe, 'function', `${name} 应声明 isConcurrencySafe`)
+    assert.equal(tool.isConcurrencySafe({}), true)
+  }
+  assert.equal(harness.tools.get('map_set_keys').isConcurrencySafe, undefined)
 })
 
 test('map_search: 未配置 Key 返回可操作错误', async () => {
@@ -459,6 +472,62 @@ test('map_ip_detail: shodan 返回 vulns 与服务列表', async () => {
   assert.deepEqual(res.vulns, ['CVE-2016-1234'])
   assert.equal(res.services[0].port, 53)
   assert.equal(res.services[0].source, 'dns-udp')
+})
+
+test('map_ip_detail: shodan honeyscore=true 附带蜜罐评分', async () => {
+  const shell = makeShell([
+    { stdout: `${SHODAN_HOST_RES}\n__MAPSCAN_HTTP__:200` },
+    { stdout: `0.3\n__MAPSCAN_HTTP__:200` },
+  ])
+  const credentials = makeCredentials({ SHODAN_API_KEY: 'K-SHODAN' })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools
+    .get('map_ip_detail')
+    .execute({ platform: 'shodan', ip: '8.8.8.8', honeyscore: true })
+  assert.equal(res.ok, true)
+  assert.equal(res.honeyscore, 0.3)
+  assert.equal(shell.calls.length, 2)
+  assert.match(shell.calls[1].command, /labs\/honeyscore\/8\.8\.8\.8/)
+})
+
+test('map_ip_detail: honeyscore 失败降级为 honeyscore_error', async () => {
+  const shell = makeShell([
+    { stdout: `${SHODAN_HOST_RES}\n__MAPSCAN_HTTP__:200` },
+    { stdout: `Access denied\n__MAPSCAN_HTTP__:401` },
+  ])
+  const credentials = makeCredentials({ SHODAN_API_KEY: 'K-SHODAN' })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools
+    .get('map_ip_detail')
+    .execute({ platform: 'shodan', ip: '8.8.8.8', honeyscore: true })
+  assert.equal(res.ok, true) // 详情本身成功
+  assert.equal('honeyscore' in res, false)
+  assert.match(res.honeyscore_error, /响应不是 JSON/)
+})
+
+test('map_dns: 批量解析域名返回映射', async () => {
+  const shell = makeShell([
+    { stdout: `{"example.com":"1.2.3.4","api.example.com":"5.6.7.8"}\n__MAPSCAN_HTTP__:200` },
+  ])
+  const credentials = makeCredentials({ SHODAN_API_KEY: 'K-SHODAN' })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools
+    .get('map_dns')
+    .execute({ hostnames: 'example.com, api.example.com' })
+  assert.equal(res.ok, true)
+  assert.deepEqual(res.resolved, { 'example.com': '1.2.3.4', 'api.example.com': '5.6.7.8' })
+  assert.match(shell.calls[0].command, /dns\/resolve\?hostnames=example\.com%2Capi\.example\.com/)
+})
+
+test('map_dns: 未配置 shodan Key 返回可操作错误', async () => {
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell: makeShell([]) }))
+  const res = await harness.tools.get('map_dns').execute({ hostnames: 'example.com' })
+  assert.equal(res.ok, false)
+  assert.match(res.error, /map_set_keys/)
 })
 
 test('map_stats: fofa 聚合统计透传 aggs', async () => {

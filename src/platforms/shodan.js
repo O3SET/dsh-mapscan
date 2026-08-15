@@ -146,3 +146,31 @@ export async function accountShodan(ctx, key) {
     usage_limits: data.usage_limits,
   })
 }
+
+/** dns/resolve — 批量域名解析, 返回 { 域名: IP } 映射 */
+export async function dnsResolveShodan(ctx, hostnames, key) {
+  const list = String(hostnames)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 20)
+  if (list.length === 0) throw new Error('hostnames 参数为空或格式错误')
+  const url =
+    `${SHODAN_BASE}/dns/resolve?hostnames=${encodeURIComponent(list.join(','))}` +
+    `&key=${encodeURIComponent(key)}`
+  const { data } = await fetchJson(ctx, url, { timeoutSec: 30 })
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`Shodan 返回异常: ${trunc(JSON.stringify(data), 300)}`)
+  }
+  return clean({ platform: 'shodan', hostnames: list, resolved: data })
+}
+
+/** labs/honeyscore/{ip} — 蜜罐评分 (0.0~1.0, 需 Shodan 会员计划) */
+export async function honeyscoreShodan(ctx, ip, key) {
+  const url = `${SHODAN_BASE}/labs/honeyscore/${encodeURIComponent(ip)}?key=${encodeURIComponent(key)}`
+  const { data } = await fetchJson(ctx, url, { timeoutSec: 30 })
+  if (typeof data !== 'number') {
+    throw new Error(`Shodan honeyscore 返回异常: ${trunc(JSON.stringify(data), 300)}`)
+  }
+  return data
+}

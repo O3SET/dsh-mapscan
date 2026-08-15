@@ -51,6 +51,8 @@ export function makeMapSearchTool(ctx) {
       required: ['platform', 'query'],
     },
     output: JSON_OUTPUT,
+    // 只读操作, 可与其他 map_* 工具并行 (多平台联合测绘)
+    isConcurrencySafe: () => true,
     async execute(args) {
       const platform = args.platform
       try {

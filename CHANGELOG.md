@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-15
+
+### Added
+
+- `map_dns`：Shodan DNS 批量解析工具（域名 → IP 映射，不消耗查询额度）
+- `map_ip_detail` 新增 `honeyscore` 参数：附带 Shodan 蜜罐评分（评分失败自动降级为 `honeyscore_error`，不影响详情结果）
+- 只读工具（search / ip_detail / stats / account / dns）声明 `isConcurrencySafe`，支持多平台并行测绘；`map_set_keys` 保持独占
+- GitHub 工程化：Release 工作流（tag 触发，校验后自动从 CHANGELOG 生成 Release 说明）、Dependabot（npm + GitHub Actions 每周更新）、CODEOWNERS
+- `test:coverage` 覆盖率报告脚本（CI Node 24 车道执行）
+
+### Changed
+
+- curl 请求增加瞬时网络错误自动重试（`--retry 1 --retry-delay 1 --retry-connrefused`，不重试 HTTP 4xx/5xx）
+- 无响应体错误按 超时/中止/退出码 正交上报终止原因（对齐官方 defensive-patterns）
+- `package.json` 补充 `repository` / `bugs` / `homepage` 元数据
+
 ## [1.0.1] - 2026-08-15
 
 ### Changed

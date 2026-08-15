@@ -79,7 +79,8 @@ const HTTP_MARKER = '__MAPSCAN_HTTP__:'
 async function curlJson(ctx, url, options = {}) {
   const headers = options.headers || {}
   const timeoutSec = options.timeoutSec || 30
-  let cmd = `curl.exe -s -S --max-time ${timeoutSec}`
+  // --retry 1: 对瞬时网络错误(连接被拒/超时)自动重试一次, 不重试 HTTP 4xx/5xx
+  let cmd = `curl.exe -s -S --max-time ${timeoutSec} --retry 1 --retry-delay 1 --retry-connrefused`
   cmd += ` -H ${pq('Accept: application/json')}`
   cmd += ` -H ${pq('User-Agent: MapScan/1.0 DSH-plugin')}`
   for (const name of Object.keys(headers)) {
@@ -114,7 +115,13 @@ async function curlJson(ctx, url, options = {}) {
 
   const trimmed = body.trim()
   if (trimmed.length === 0) {
-    const detail = trunc(errText || `curl 退出码 ${res.exitCode}`, 400)
+    // 正交上报终止原因: 超时/中止/退出码各自独立判定 (defensive-patterns)
+    const cause = res.timedOut
+      ? '命令超时'
+      : res.aborted
+        ? '命令被中止'
+        : `curl 退出码 ${res.exitCode}`
+    const detail = trunc(errText || cause, 400)
     throw new Error(`HTTP 请求失败 (无响应体, HTTP ${status || '?'}): ${detail}`)
   }
   let data
@@ -568,6 +575,34 @@ async function accountShodan(ctx, key) {
   })
 }
 
+/** dns/resolve — 批量域名解析, 返回 { 域名: IP } 映射 */
+async function dnsResolveShodan(ctx, hostnames, key) {
+  const list = String(hostnames)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 20)
+  if (list.length === 0) throw new Error('hostnames 参数为空或格式错误')
+  const url =
+    `${SHODAN_BASE}/dns/resolve?hostnames=${encodeURIComponent(list.join(','))}` +
+    `&key=${encodeURIComponent(key)}`
+  const { data } = await fetchJson(ctx, url, { timeoutSec: 30 })
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`Shodan 返回异常: ${trunc(JSON.stringify(data), 300)}`)
+  }
+  return clean({ platform: 'shodan', hostnames: list, resolved: data })
+}
+
+/** labs/honeyscore/{ip} — 蜜罐评分 (0.0~1.0, 需 Shodan 会员计划) */
+async function honeyscoreShodan(ctx, ip, key) {
+  const url = `${SHODAN_BASE}/labs/honeyscore/${encodeURIComponent(ip)}?key=${encodeURIComponent(key)}`
+  const { data } = await fetchJson(ctx, url, { timeoutSec: 30 })
+  if (typeof data !== 'number') {
+    throw new Error(`Shodan honeyscore 返回异常: ${trunc(JSON.stringify(data), 300)}`)
+  }
+  return data
+}
+
 
 // ---- src/platforms/hunter.js ----
 /**
@@ -984,6 +1019,8 @@ function makeMapSearchTool(ctx) {
       required: ['platform', 'query'],
     },
     output: JSON_OUTPUT,
+    // 只读操作, 可与其他 map_* 工具并行 (多平台联合测绘)
+    isConcurrencySafe: () => true,
     async execute(args) {
       const platform = args.platform
       try {
@@ -1027,7 +1064,7 @@ function makeMapSearchTool(ctx) {
 
 // ---- src/tools/map_ip_detail.js ----
 /**
- * map_ip_detail — 单 IP 测绘详情 (fofa / shodan)。
+ * map_ip_detail — 单 IP 测绘详情 (fofa / shodan), 可选 Shodan 蜜罐评分。
  * @module src/tools/map_ip_detail
  */
 
@@ -1036,17 +1073,24 @@ function makeMapIpDetailTool(ctx) {
     name: 'map_ip_detail',
     description:
       '查询单个 IP 的主机测绘详情。platform 支持 fofa、shodan。' +
-      '返回端口/协议列表、服务 banner、SSL 证书、历史记录(fofa)、CVE 漏洞(shodan vulns)等。',
+      '返回端口/协议列表、服务 banner、SSL 证书、历史记录(fofa)、CVE 漏洞(shodan vulns)等；' +
+      'shodan 可加 honeyscore=true 附带蜜罐评分(需付费计划)。',
     parameters: {
       type: 'object',
       properties: {
         platform: { type: 'string', enum: ['fofa', 'shodan'], description: '测绘平台' },
         ip: { type: 'string', description: '目标 IP，如 1.1.1.1' },
+        honeyscore: {
+          type: 'boolean',
+          description: '仅 shodan: true 时额外查询蜜罐评分(/labs/honeyscore, 需付费计划)',
+        },
         key: { type: 'string', description: '可选: 临时覆盖该平台的 API Key' },
       },
       required: ['platform', 'ip'],
     },
     output: JSON_OUTPUT,
+    // 只读操作, 可与其他 map_* 工具并行
+    isConcurrencySafe: () => true,
     async execute(args) {
       try {
         const key = await resolveKey(ctx, args.platform, args.key)
@@ -1059,6 +1103,16 @@ function makeMapIpDetailTool(ctx) {
           }
         }
         const res = await DETAILERS[args.platform](ctx, String(args.ip), key)
+        if (args.platform === 'shodan' && args.honeyscore === true) {
+          try {
+            res.honeyscore = await honeyscoreShodan(ctx, String(args.ip), key)
+          } catch (error) {
+            res.honeyscore_error = trunc(
+              error && error.message ? error.message : String(error),
+              200,
+            )
+          }
+        }
         res.ok = true
         return res
       } catch (error) {
@@ -1100,6 +1154,8 @@ function makeMapStatsTool(ctx) {
       required: ['platform', 'query'],
     },
     output: JSON_OUTPUT,
+    // 只读操作, 可与其他 map_* 工具并行
+    isConcurrencySafe: () => true,
     async execute(args) {
       try {
         const key = await resolveKey(ctx, args.platform, args.key)
@@ -1148,6 +1204,8 @@ function makeMapAccountTool(ctx) {
       required: ['platform'],
     },
     output: JSON_OUTPUT,
+    // 只读操作, 可与其他 map_* 工具并行
+    isConcurrencySafe: () => true,
     async execute(args) {
       try {
         const key = await resolveKey(ctx, args.platform, args.key)
@@ -1164,6 +1222,55 @@ function makeMapAccountTool(ctx) {
         return res
       } catch (error) {
         return toolError('map_account 失败', error)
+      }
+    },
+  })
+}
+
+
+// ---- src/tools/map_dns.js ----
+/**
+ * map_dns — Shodan DNS 批量解析 (域名 -> IP)。
+ * @module src/tools/map_dns
+ */
+
+function makeMapDnsTool(ctx) {
+  return harness.defineTool({
+    name: 'map_dns',
+    description:
+      'Shodan DNS 批量解析: 把域名解析为 IP (GET /dns/resolve)。' +
+      'hostnames 传逗号分隔的域名列表(最多 20 个), 如 example.com,api.example.com。' +
+      '返回 {域名: IP} 映射; 无法解析的域名会缺失, 不消耗查询额度。',
+    parameters: {
+      type: 'object',
+      properties: {
+        hostnames: {
+          type: 'string',
+          description: '逗号分隔的域名列表, 最多 20 个, 如 example.com,api.example.com',
+        },
+        key: { type: 'string', description: '可选: 临时覆盖 Shodan API Key' },
+      },
+      required: ['hostnames'],
+    },
+    output: JSON_OUTPUT,
+    // 只读操作, 可与其他 map_* 工具并行
+    isConcurrencySafe: () => true,
+    async execute(args) {
+      try {
+        const key = await resolveKey(ctx, 'shodan', args.key)
+        if (!key) {
+          return {
+            ok: false,
+            error:
+              `未配置 shodan 的 API Key。请先调用 map_set_keys 或设置环境变量 ` +
+              PRIMARY_REFS.shodan,
+          }
+        }
+        const res = await dnsResolveShodan(ctx, String(args.hostnames), key)
+        res.ok = true
+        return res
+      } catch (error) {
+        return toolError('map_dns 失败', error)
       }
     },
   })
@@ -1226,6 +1333,7 @@ function makeTools(ctx) {
     makeMapIpDetailTool(ctx),
     makeMapStatsTool(ctx),
     makeMapAccountTool(ctx),
+    makeMapDnsTool(ctx),
     makeMapSetKeysTool(ctx),
   ]
 }

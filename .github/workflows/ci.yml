@@ -38,3 +38,7 @@ jobs:
 
       - name: Build + Test (node:test)
         run: npm run test
+
+      - name: Test coverage report (Node 24 only)
+        if: matrix.node-version == '24.x'
+        run: npm run test:coverage

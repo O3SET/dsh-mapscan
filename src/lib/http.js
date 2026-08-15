@@ -20,7 +20,8 @@ const HTTP_MARKER = '__MAPSCAN_HTTP__:'
 export async function curlJson(ctx, url, options = {}) {
   const headers = options.headers || {}
   const timeoutSec = options.timeoutSec || 30
-  let cmd = `curl.exe -s -S --max-time ${timeoutSec}`
+  // --retry 1: 对瞬时网络错误(连接被拒/超时)自动重试一次, 不重试 HTTP 4xx/5xx
+  let cmd = `curl.exe -s -S --max-time ${timeoutSec} --retry 1 --retry-delay 1 --retry-connrefused`
   cmd += ` -H ${pq('Accept: application/json')}`
   cmd += ` -H ${pq('User-Agent: MapScan/1.0 DSH-plugin')}`
   for (const name of Object.keys(headers)) {
@@ -55,7 +56,13 @@ export async function curlJson(ctx, url, options = {}) {
 
   const trimmed = body.trim()
   if (trimmed.length === 0) {
-    const detail = trunc(errText || `curl 退出码 ${res.exitCode}`, 400)
+    // 正交上报终止原因: 超时/中止/退出码各自独立判定 (defensive-patterns)
+    const cause = res.timedOut
+      ? '命令超时'
+      : res.aborted
+        ? '命令被中止'
+        : `curl 退出码 ${res.exitCode}`
+    const detail = trunc(errText || cause, 400)
     throw new Error(`HTTP 请求失败 (无响应体, HTTP ${status || '?'}): ${detail}`)
   }
   let data

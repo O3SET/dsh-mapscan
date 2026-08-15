@@ -57,15 +57,15 @@ radar 判定层级：**L0 发现（topic）→ L1 清单（package.json/入口�
 
 ```text
 ## 测试环境
-- 插件: mapscan-dsh v1.0.1 (commit <发布 commit>)
+- 插件: mapscan-dsh v1.1.0 (commit <发布 commit>)
 - DSH: @deepseek-ai/dsh 0.1.0-rc.6 (2026-08-15 官方快照)
 - OS: Windows 11; Node: v24.9.0; curl: 8.21
 
 ## 测试层级与结果
 - L1 清单: package.json name/main/exports/dsh.entry 齐全 (npm pack --dry-run 通过)
-- L2/L3: npm run check 全绿 (ESLint + Prettier + 构建 + node:test 39/39)
-- L4 运行级: DSH 会话内 cordis_define/cordis_run 成功; Tool 注册可见 (map_search/
-  map_ip_detail/map_stats/map_account/map_set_keys); 五平台 API 域名连通性冒烟通过
+- L2/L3: npm run check 全绿 (ESLint + Prettier + 构建 + node:test 全量通过)
+- L4 运行级: DSH 会话内 cordis_define/cordis_run 成功; 6 个工具注册可见 (map_search/
+  map_ip_detail/map_stats/map_account/map_dns/map_set_keys); 五平台 API 域名连通性冒烟通过
   (无密钥路径: 各平台返回预期鉴权错误码, 插件正确转译为中文错误信息)
 ```
 

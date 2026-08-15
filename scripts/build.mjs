@@ -36,6 +36,7 @@ const MODULES = [
   'src/tools/map_ip_detail.js',
   'src/tools/map_stats.js',
   'src/tools/map_account.js',
+  'src/tools/map_dns.js',
   'src/tools/map_set_keys.js',
   'src/tools/index.js',
   'src/index.js',
