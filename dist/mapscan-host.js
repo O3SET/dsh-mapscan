@@ -340,18 +340,35 @@ function setConfig(ctx, config) {
   else ctx[CONFIG] = normalized
 }
 
+/**
+ * 解包配置值。
+ * 带 `.volatile()` 的 schemastery 字段在运行时是**引用对象** (`{ get() }`), 由 loader 在
+ * 配置变更时原地更新, 因此不能当普通字符串使用; 非 volatile 情形仍是普通值。
+ */
+function unwrapConfigValue(value) {
+  if (value === undefined || value === null) return undefined
+  if (typeof value === 'object' && typeof value.get === 'function') {
+    try {
+      return value.get()
+    } catch (_error) {
+      return undefined
+    }
+  }
+  return value
+}
+
 /** 读取插件 Config 里该平台的 Key (未配置返回 undefined) */
 function configKey(ctx, platform) {
   const config = ctx && ctx[CONFIG]
-  const value = config && config[platform]
+  const value = unwrapConfigValue(config && config[platform])
   return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
 /** 读取插件 Config 里的单请求超时(秒), 未配置返回 undefined */
 function configTimeoutSec(ctx) {
   const config = ctx && ctx[CONFIG]
-  const value = config && config.timeoutSec
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
+  const value = Number(unwrapConfigValue(config && config.timeoutSec))
+  return Number.isFinite(value) && value > 0 ? value : undefined
 }
 
 /**
@@ -1954,17 +1971,24 @@ function makeTools(ctx) {
 const CONFIG_KEY_FIELDS = ['fofa', 'shodan', 'hunter', 'zoomeye', 'quake']
 
 /**
- * 插件配置 (Standard Schema)。
+ * 构建期注入 schemastery 的 Config (仅 Loader/ESM 产物)。
  *
- * Cordis 的 resolveConfig 无条件取 `Config['~standard'].validate(config)`:
- *   - 必须有 `~standard` (普通字面量对象会在挂载时抛 TypeError 而永不生效);
- *   - 不允许异步 (返回 Promise 会抛 "Async config validation is not supported");
- *   - 返回 { value } 表示通过, { issues } 表示校验失败并阻止插件挂载。
- *
- * 每个字段用 `{ type, description }` 描述, DSH 设置页据此生成输入框。
- * 留空即视为未配置, 回退到凭证库 / 环境变量 (见 lib/credentials.resolveKey)。
+ * 为什么是"注入"而不是 import:
+ *   - 动态插件产物 dist/mapscan-host.js 是**函数体**, 没有模块系统, 任何 import 都解析不了;
+ *   - 而 DSH 的配置发现 (dsh-tool-cordis/lib/config.js → liveConfig) 用
+ *     `isNativeConfigSchema(config)` 判定, 要求对象带 `Symbol.for('schemastery') === true`
+ *     + 字符串 `type` + 对象 `meta` (dsh-app-boot/lib/index.js:2162)。
+ *     手写 `{ '~standard': { validate } }` 能通过 Cordis 的 resolveConfig 让插件正常挂载,
+ *     但判定为 `unsupported`, 设置页就不会生成配置表单。
+ * scripts/build.mjs 在产出 dist/mapscan-plugin.mjs 时, 把下面的降级赋值整行替换为真实的
+ * schemastery 定义; 动态插件产物保留降级版 (工具与 Key 解析照常可用, 只是没有设置页表单)。
  */
-const Config = {
+
+/**
+ * 无 schemastery 时的降级 Config (Standard Schema)。
+ * 只保证插件能正常挂载与读取配置, 不产出设置页表单。
+ */
+const CONFIG_FALLBACK = {
   '~standard': {
     version: 1,
     vendor: 'mapscan-dsh',
@@ -1976,19 +2000,10 @@ const Config = {
       const out = {}
       for (const platform of CONFIG_KEY_FIELDS) {
         const raw = value[platform]
-        if (raw === undefined || raw === null) continue
-        if (typeof raw !== 'string') {
-          return { issues: [{ message: `mapscan-dsh: config.${platform} 必须是字符串` }] }
-        }
-        const key = raw.trim()
-        if (key.length > 0) out[platform] = key
+        if (typeof raw === 'string' && raw.trim().length > 0) out[platform] = raw.trim()
       }
-      if (value.timeoutSec !== undefined && value.timeoutSec !== null) {
-        const seconds = Number(value.timeoutSec)
-        if (!Number.isFinite(seconds) || seconds <= 0) {
-          return { issues: [{ message: 'mapscan-dsh: config.timeoutSec 必须是正数' }] }
-        }
-        // 与各平台单请求超时同一口径: 夹在 5~300 秒
+      const seconds = Number(value.timeoutSec)
+      if (Number.isFinite(seconds) && seconds > 0) {
         out.timeoutSec = Math.min(300, Math.max(5, Math.floor(seconds)))
       }
       return { value: out }
@@ -1996,12 +2011,20 @@ const Config = {
   },
 }
 
+/** 生效的 Config: ESM 产物由构建换为 schemastery 版本, 其余情形用降级版 */
+// eslint-disable-next-line prefer-const -- 构建脚本会在 ESM 产物里重新赋值 (见 scripts/build.mjs)
+let Config = CONFIG_FALLBACK
+
 /** MapScan 插件对象 */
 const plugin = {
   name: 'MapScan 网络空间测绘',
   // shell: HTTP 主通道; tools: 注册工具 (Loader 持久化路径经 ctx.tools.register, 必须显式注入)
   inject: ['shell', 'tools'],
-  Config,
+  // getter 而非取值: 构建期注入的 schemastery 版本在对象字面量之后才赋值,
+  // 写成 `Config,` 会永久捕获降级版, 导致 DSH 判定 unsupported 而设置页无表单。
+  get Config() {
+    return Config
+  },
   apply(ctx, config) {
     // 配置挂到 ctx 的 symbol 槽位 (不污染 ctx 命名空间), 供 resolveKey 读取
     setConfig(ctx, config)

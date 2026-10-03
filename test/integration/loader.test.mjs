@@ -105,38 +105,55 @@ test('Loader 变体: execute 在无 Key 时返回可操作错误', async () => {
   assert.match(res.error, /MAPSCAN_FOFA_API_KEY/)
 })
 
-test('Config 契约: 导出 Standard Schema 且行为正确', async () => {
-  // Cordis 的 resolveConfig 无条件取 Config['~standard'].validate(config);
-  // 没有它, DSH 设置页就渲染不出配置表单(插件卡片显示为不可配置)。
+test('Config 契约: 必须是 schemastery 原生 schema (否则设置页不出表单)', async () => {
+  // DSH 的配置发现 (dsh-tool-cordis/lib/config.js → liveConfig) 用
+  // isNativeConfigSchema(config) 判定; 不满足时 status='unsupported', 设置页不生成表单。
+  // 该判定要求 Symbol.for('schemastery')===true + 字符串 type + 对象 meta。
   const plugin = await loadLoaderPlugin()
-  const schema = plugin.Config?.['~standard']
-  assert.equal(typeof schema?.validate, 'function', '必须导出 Config["~standard"].validate')
+  const config = plugin.Config
+  assert.notEqual(config, undefined, '必须导出 Config')
+
+  assert.equal(
+    Reflect.get(config, Symbol.for('schemastery')),
+    true,
+    '必须是 schemastery schema (手写 Standard Schema 能挂载但拿不到表单)',
+  )
+  assert.equal(typeof config.type, 'string')
+  assert.equal(config.meta !== null && typeof config.meta === 'object', true)
+
+  // Cordis 的 resolveConfig 走 Config['~standard'].validate
+  const schema = config['~standard']
+  assert.equal(typeof schema?.validate, 'function')
   assert.equal(schema.version, 1)
-
-  // 空 / 缺省 -> 空配置
-  assert.deepEqual(schema.validate(undefined).value, {})
-  assert.deepEqual(schema.validate(null).value, {})
-  assert.deepEqual(schema.validate({}).value, {})
-
-  // 正常填写: 去空白, 只保留非空字段
-  assert.deepEqual(schema.validate({ fofa: ' K-FOFA ', shodan: '' }).value, { fofa: 'K-FOFA' })
-  assert.deepEqual(schema.validate({ fofa: 'K', shodan: 'S', hunter: 'H' }).value, {
-    fofa: 'K',
-    shodan: 'S',
-    hunter: 'H',
-  })
-
-  // timeoutSec 夹取到 5~300 秒
-  assert.equal(schema.validate({ timeoutSec: 1 }).value.timeoutSec, 5)
-  assert.equal(schema.validate({ timeoutSec: 9999 }).value.timeoutSec, 300)
-  assert.equal(schema.validate({ timeoutSec: 45 }).value.timeoutSec, 45)
-
-  // 非法输入 -> issues (会阻止插件挂载), 且绝不能返回 Promise
-  assert.ok(schema.validate('nope').issues)
-  assert.ok(schema.validate([]).issues)
-  assert.ok(schema.validate({ fofa: 123 }).issues, 'Key 必须是字符串')
-  assert.ok(schema.validate({ timeoutSec: -1 }).issues)
   assert.equal('then' in schema.validate({}), false, 'validate 不能是异步的')
+
+  // 合法输入通过 (schemastery 会把所有字段解析为可变引用, 这里断言取值正确且无 issues)
+  const parsed = schema.validate({ fofa: 'K-FOFA', timeoutSec: 45 })
+  assert.equal(parsed.issues, undefined)
+  const read = (v) => (v && typeof v.get === 'function' ? v.get() : v)
+  assert.equal(read(parsed.value.fofa), 'K-FOFA')
+  assert.equal(read(parsed.value.timeoutSec), 45)
+  assert.equal(read(parsed.value.shodan), undefined, '未填写的 Key 不应有值')
+  // 非法输入 -> issues (阻止插件挂载)
+  assert.ok(schema.validate({ fofa: 123 }).issues, 'Key 必须是字符串')
+  assert.ok(schema.validate({ timeoutSec: 'x' }).issues)
+
+  // 表单可见性: 每个字段都必须 volatile (dsh-settings 的 volatileForm 只投影 volatile 节点)
+  const dict = config.dict ?? {}
+  assert.deepEqual(Object.keys(dict).sort(), [
+    'fofa',
+    'hunter',
+    'quake',
+    'shodan',
+    'timeoutSec',
+    'zoomeye',
+  ])
+  for (const key of Object.keys(dict)) {
+    assert.equal(dict[key].meta?.volatile, true, `${key} 必须 .volatile(), 否则设置页看不到`)
+  }
+  for (const key of ['fofa', 'shodan', 'hunter', 'zoomeye', 'quake']) {
+    assert.equal(dict[key].meta?.role, 'secret', `${key} 应标记为 secret (读取时抹掉值)`)
+  }
 })
 
 test('Config 生效: 设置页填的 Key 优先于凭证库, 空则回退', async () => {

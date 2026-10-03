@@ -41,18 +41,35 @@ export function setConfig(ctx, config) {
   else ctx[CONFIG] = normalized
 }
 
+/**
+ * 解包配置值。
+ * 带 `.volatile()` 的 schemastery 字段在运行时是**引用对象** (`{ get() }`), 由 loader 在
+ * 配置变更时原地更新, 因此不能当普通字符串使用; 非 volatile 情形仍是普通值。
+ */
+function unwrapConfigValue(value) {
+  if (value === undefined || value === null) return undefined
+  if (typeof value === 'object' && typeof value.get === 'function') {
+    try {
+      return value.get()
+    } catch (_error) {
+      return undefined
+    }
+  }
+  return value
+}
+
 /** 读取插件 Config 里该平台的 Key (未配置返回 undefined) */
 export function configKey(ctx, platform) {
   const config = ctx && ctx[CONFIG]
-  const value = config && config[platform]
+  const value = unwrapConfigValue(config && config[platform])
   return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
 /** 读取插件 Config 里的单请求超时(秒), 未配置返回 undefined */
 export function configTimeoutSec(ctx) {
   const config = ctx && ctx[CONFIG]
-  const value = config && config.timeoutSec
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
+  const value = Number(unwrapConfigValue(config && config.timeoutSec))
+  return Number.isFinite(value) && value > 0 ? value : undefined
 }
 
 /**

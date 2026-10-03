@@ -23,4 +23,13 @@ export default [
       'no-console': 'off',
     },
   },
+  {
+    // 浏览器半侧: classic script, 跑在 Web 客户端里 (window / document 由宿主提供)
+    files: ['src/client.js'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+      },
+    },
+  },
 ]

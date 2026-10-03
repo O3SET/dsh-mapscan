@@ -127,6 +127,14 @@ map_account   { "platform": "fofa" }
 该表单由插件的 `Config`（Standard Schema，见 [src/index.js](src/index.js)）驱动，值落在 profile 的
 `cordis.patch.yml` 中 `mapscan-dsh` 那一行的 `config:` 块里（见本仓库 [cordis.patch.yml](cordis.patch.yml)）。
 
+> 实现要点（供二次开发者参考，也是本插件踩过的坑）：
+>
+> 1. DSH **不会**从插件 `Config` 自动生成表单——`autoGenerate` 目前没有任何客户端消费；
+> 2. `Config` 必须是 **schemastery** schema（`isNativeConfigSchema` 判定），否则配置 status 为 `unsupported`；
+> 3. 字段要出现在表单里且可写，必须加 **`.volatile()`**；API Key 另加 `.role('secret')`
+>    （读取时值被抹掉，只回传 `{path,set}` 存在性，故表单显示「已配置（留空不改动）」）；
+> 4. 只有本机回环地址下才能持久化写入（非回环时服务降级为 memory 模式，写入不落盘）。
+
 **方式二：对话里配置 / 环境变量**
 
 | 配置项                                                                                              | 默认           | 说明                                    |

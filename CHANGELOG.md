@@ -5,6 +5,28 @@
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-04
+
+### Fixed
+
+- **设置页里没有可填的配置表单**（1.6.0 的 `Config` 仍然无效）。实测推翻了我此前的两个错误前提：
+  1. DSH 的插件配置表单**不会**自动生成——`dsh-settings` 只把带 **`.volatile()`** 的字段投影进 `settings.describe()`（`volatileForm` 只递归 object 且只收 volatile 叶子），非 volatile 字段**既不可见也不可写**；`autoGenerate` 虽被上报，但官方 README 明说 “no shipped client does so yet”，没有内置客户端消费它。
+  2. 表单要求 `Config` 是 **schemastery 原生 schema**——`dsh-tool-cordis/lib/config.js` 的 `liveConfig` 用 `isNativeConfigSchema()` 判定（`Symbol.for('schemastery')===true` + 字符串 `type` + 对象 `meta`），不满足时 status 为 `unsupported`。手写 `{'~standard':{validate}}` 能让插件挂载，但拿不到表单。
+
+### Added
+
+- **浏览器半侧 `src/client.js` → `dist/mapscan-client.js`**：注册 `settings.section` 页面（设置 → MapScan），五个平台 Key 与超时可直接填写保存。按 client-modules 契约写成 classic script（`window.__ModuleLoader__.load({ id: 'mapscan-dsh', factory })`，id 必须等于包名），只 `require` 宿主模块表里的 `react`；写入经 `ctx.configForms.get('mapscan-dsh')` → `mutate()`，命名空间即 bundle 补丁那一行的 id，落盘到该行 `config:`。
+- `package.json`：`dsh.client: { platform: 'web', inject: [...] }` 与 `exports['./client']`。
+- 构建产出第三个产物 `dist/mapscan-client.js`，并校验其 `__ModuleLoader__` id 等于包名。
+
+### Changed
+
+- **Config 改为 schemastery 且字段标记 `.volatile()`；API Key 另加 `.role('secret')`**：secret 的值不会被回传（`redactSecrets` 只回 `{path,set}` 存在性），表单显示为「已配置（留空不改动）」，避免把掩码写回覆盖真值。
+- Config 由构建注入 ESM 产物（动态插件函数体没有模块系统，无法 import schemastery），动态产物保留降级 Config；`plugin.Config` 改为 getter，避免对象字面量提前捕获降级版。
+- 宿主侧读配置时解包 volatile 引用（`.get()`）——volatile 字段运行时是引用对象而非普通字符串，直接当字符串用会让所有 Key 解析失效。
+- 新增依赖 `@deepseek-ai/schemastery`（`^3.18.4`）。
+- 测试断言 `Config` 是 schemastery、每个字段都 `.volatile()`、五个 Key 都是 `secret`。90 例。
+
 ## [1.6.0] - 2026-10-04
 
 ### Added
