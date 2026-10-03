@@ -5,10 +5,20 @@
  * 注意: typeof 对未声明标识符是安全的, 两种运行时都不会抛 ReferenceError。
  * @module src/lib/runtime
  */
+import { jsonSafe } from './utils.js'
+
+/**
+ * 包一层输出收敛: 工具返回值必须是无损 JSON (undefined / 非有限数 / -0 会让 DSH 丢弃整个
+ * 结果, 见 utils.jsonSafe)。两个运行时都套用, 保证行为一致。
+ */
+function withJsonSafe(execute) {
+  return async (args, exec) => jsonSafe(await execute(args, exec))
+}
 
 /** 构造工具定义: 沙箱走官方 DSL 编译, Loader 下直接透传 (schema 由调用方给出原始 JSON Schema) */
 export function defineTool(options) {
-  if (typeof harness !== 'undefined') return harness.defineTool(options)
+  const execute = withJsonSafe(options.execute)
+  if (typeof harness !== 'undefined') return harness.defineTool({ ...options, execute })
   return {
     name: options.name,
     description: options.description,
@@ -17,7 +27,7 @@ export function defineTool(options) {
     ...(typeof options.isConcurrencySafe === 'function'
       ? { isConcurrencySafe: options.isConcurrencySafe }
       : {}),
-    execute: options.execute,
+    execute,
   }
 }
 

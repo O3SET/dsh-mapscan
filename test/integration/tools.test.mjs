@@ -10,6 +10,33 @@ import vm from 'node:vm'
 
 const DIST = fileURLToPath(new URL('../../dist/mapscan-host.js', import.meta.url))
 
+/**
+ * 断言值可无损 JSON 往返 —— 复刻 DSH dsh-tools 的 snapshotJsonValue 规则:
+ * undefined / 函数 / symbol / bigint, 非有限数字, 以及 -0 都会让整个工具结果被判无效。
+ */
+function assertNoUndefined(value, path = 'value') {
+  const seen = new WeakSet()
+  const bad = []
+  const walk = (v, p) => {
+    if (v === null) return
+    const t = typeof v
+    if (t === 'undefined') return bad.push(`${p} = undefined`)
+    if (t === 'function' || t === 'symbol' || t === 'bigint') return bad.push(`${p} = ${t}`)
+    if (t === 'number') {
+      if (!Number.isFinite(v)) bad.push(`${p} = ${v}`)
+      else if (Object.is(v, -0)) bad.push(`${p} = -0`)
+      return
+    }
+    if (t !== 'object') return
+    if (seen.has(v)) return bad.push(`${p} = 循环引用`)
+    seen.add(v)
+    if (Array.isArray(v)) return v.forEach((x, i) => walk(x, `${p}[${i}]`))
+    for (const k of Reflect.ownKeys(v)) walk(v[k], `${p}.${String(k)}`)
+  }
+  walk(value, path)
+  assert.deepEqual(bad, [], `输出必须是无损 JSON, 违规: ${bad.join(', ')}`)
+}
+
 /** mock harness: 记录 defineTool / registerTool 调用 */
 function makeHarness() {
   const tools = new Map()
@@ -22,7 +49,9 @@ function makeHarness() {
         // 真实运行时会把 parameters 归一化并宿主化 (JSON round-trip), 此处保持一致
         parameters: JSON.parse(JSON.stringify(options.parameters)),
         isConcurrencySafe: options.isConcurrencySafe,
-        execute: async (args) => JSON.parse(JSON.stringify(await options.execute(args))),
+        // 真实 dsh-tools 以 execute(args, exec) 调用工具并透传 ToolRunContext, 此处保持一致
+        execute: async (args, exec) =>
+          JSON.parse(JSON.stringify(await options.execute(args, exec))),
       }
     },
     registerTool(_ctx, tool) {
@@ -74,22 +103,52 @@ function makeFs() {
 }
 
 /**
- * mock ctx.shell: 按调用顺序弹出预置响应。
- * 每个响应 { exitCode, stdout, stderr }
+ * mock ctx.shell, 照 DeepSeek Harness 0.2.0-rc.2 契约实现:
+ *   resolve(request) -> ShellExecSpec; execute(spec) -> ShellExecution; await handle.result()
+ * 按调用顺序弹出预置响应; 每个响应 { exitCode, stdout, stderr }。
+ * `calls` 记录每次 HTTP 调用的 resolve 请求 (含 command), 与插件调用一一对应。
  */
 function makeShell(responses) {
   const calls = []
+  const specs = []
   const queue = [...responses]
   return {
     calls,
-    run: async (req) => {
-      calls.push(req)
+    specs,
+    resolve(request) {
+      calls.push(request)
+      return {
+        command: request.command,
+        workdir: request.workdir ?? 'D:\\ws',
+        timeoutMs: request.timeoutMs ?? 120000,
+        onExpiry: request.onExpiry ?? 'kill',
+        stdoutMaxBytes: request.stdoutMaxBytes ?? 4194304,
+        sandboxPolicy: request.sandboxPolicy ?? {
+          mode: 'workspace-write',
+          workspaceRoot: 'D:\\ws',
+        },
+      }
+    },
+    async execute(spec) {
+      specs.push(spec)
       const next = queue.shift()
       if (!next) throw new Error('mock shell 响应队列耗尽')
-      return {
+      const outcome = {
         exitCode: next.exitCode ?? 0,
-        stdout: { text: next.stdout },
-        stderr: { text: next.stderr ?? '' },
+        signal: null,
+        timedOut: next.timedOut ?? false,
+        aborted: next.aborted ?? false,
+        timeoutMs: spec.timeoutMs,
+        stdout: { text: next.stdout ?? '', truncated: false },
+        stderr: { text: next.stderr ?? '', truncated: false },
+      }
+      return {
+        status: 'completed',
+        exitCode: outcome.exitCode,
+        signal: null,
+        async result() {
+          return outcome
+        },
       }
     },
   }
@@ -373,6 +432,53 @@ test('map_search: 未配置 Key 返回可操作错误', async () => {
   assert.equal(res.ok, false)
   assert.match(res.error, /map_set_keys/)
   assert.match(res.error, /MAPSCAN_FOFA_API_KEY/)
+})
+
+test('map_search: 缺可选字段时输出仍是无损 JSON (无 undefined)', async () => {
+  // 实测 FOFA 只回 consumed_fpoint, 不回 rest_fpoint; undefined 会让 DSH 丢弃整个结果
+  const noRest = JSON.stringify({
+    error: false,
+    size: 1,
+    page: 1,
+    results: [['1.2.3.4', '443', 'https', 'a.example.com', 'T', 'example.com']],
+    consumed_fpoint: 0,
+  })
+  const shell = makeShell([{ stdout: `${noRest}\n__MAPSCAN_HTTP__:200` }])
+  const credentials = makeCredentials({ FOFA_API_KEY: 'K-FOFA' })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const res = await harness.tools
+    .get('map_search')
+    .execute({ platform: 'fofa', query: 'app="nginx"' })
+  assert.equal(res.ok, true)
+  assert.deepEqual(res.credit, { consumed_fpoint: 0 })
+  assert.equal('rest_fpoint' in res.credit, false)
+  assertNoUndefined(res)
+})
+
+test('map_search: 转发 exec.signal 到 shell 请求 (可取消)', async () => {
+  const shell = makeShell([{ stdout: `${FOFA_SEARCH_RES}\n__MAPSCAN_HTTP__:200` }])
+  const credentials = makeCredentials({ FOFA_API_KEY: 'K-FOFA' })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  const controller = new AbortController()
+  await harness.tools.get('map_search').execute(
+    { platform: 'fofa', query: 'app="nginx"' },
+    {
+      signal: controller.signal,
+    },
+  )
+  assert.equal(shell.specs[0].command, shell.calls[0].command)
+  assert.equal(shell.calls[0].signal, controller.signal, 'exec.signal 必须下传到 shell 请求')
+})
+
+test('map_search: 无 exec 时不传 signal 字段', async () => {
+  const shell = makeShell([{ stdout: `${FOFA_SEARCH_RES}\n__MAPSCAN_HTTP__:200` }])
+  const credentials = makeCredentials({ FOFA_API_KEY: 'K-FOFA' })
+  const { plugin, harness } = await loadPlugin()
+  plugin.apply(makeCtx({ shell, credentials }))
+  await harness.tools.get('map_search').execute({ platform: 'fofa', query: 'app="nginx"' })
+  assert.equal('signal' in shell.calls[0], false)
 })
 
 test('map_search: fofa 端到端归一化 + 配额字段', async () => {

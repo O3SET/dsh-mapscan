@@ -3,6 +3,7 @@
  * @module src/tools/map_set_keys
  */
 import { setKeys } from '../lib/credentials.js'
+import { withSignal } from '../lib/http.js'
 import { JSON_OUTPUT, defineTool, toolError } from './common.js'
 
 export function makeMapSetKeysTool(ctx) {
@@ -31,12 +32,14 @@ export function makeMapSetKeysTool(ctx) {
       required: [],
     },
     output: JSON_OUTPUT,
-    async execute(args) {
-      try {
-        return await setKeys(ctx, args)
-      } catch (error) {
-        return toolError('map_set_keys 失败', error)
-      }
+    async execute(args, exec) {
+      return await withSignal(ctx, exec && exec.signal, async () => {
+        try {
+          return await setKeys(ctx, args)
+        } catch (error) {
+          return toolError('map_set_keys 失败', error)
+        }
+      })
     },
   })
 }

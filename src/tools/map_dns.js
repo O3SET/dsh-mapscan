@@ -3,6 +3,7 @@
  * @module src/tools/map_dns
  */
 import { PRIMARY_REFS, resolveKey } from '../lib/credentials.js'
+import { withSignal } from '../lib/http.js'
 import { dnsDomainShodan, dnsResolveShodan } from '../platforms/shodan.js'
 import { JSON_OUTPUT, defineTool, toolError } from './common.js'
 
@@ -31,28 +32,30 @@ export function makeMapDnsTool(ctx) {
     output: JSON_OUTPUT,
     // 只读操作, 可与其他 map_* 工具并行
     isConcurrencySafe: () => true,
-    async execute(args) {
-      try {
-        const key = await resolveKey(ctx, 'shodan', args.key)
-        if (!key) {
-          return {
-            ok: false,
-            error:
-              `未配置 shodan 的 API Key。请先调用 map_set_keys 或设置环境变量 ` +
-              PRIMARY_REFS.shodan,
+    async execute(args, exec) {
+      return await withSignal(ctx, exec && exec.signal, async () => {
+        try {
+          const key = await resolveKey(ctx, 'shodan', args.key)
+          if (!key) {
+            return {
+              ok: false,
+              error:
+                `未配置 shodan 的 API Key。请先调用 map_set_keys 或设置环境变量 ` +
+                PRIMARY_REFS.shodan,
+            }
           }
+          if (!args.hostnames && !args.domain) {
+            return { ok: false, error: 'hostnames 与 domain 必须提供一个 (批量解析/子域枚举)' }
+          }
+          const res = args.domain
+            ? await dnsDomainShodan(ctx, String(args.domain), key)
+            : await dnsResolveShodan(ctx, String(args.hostnames), key)
+          res.ok = true
+          return res
+        } catch (error) {
+          return toolError('map_dns 失败', error)
         }
-        if (!args.hostnames && !args.domain) {
-          return { ok: false, error: 'hostnames 与 domain 必须提供一个 (批量解析/子域枚举)' }
-        }
-        const res = args.domain
-          ? await dnsDomainShodan(ctx, String(args.domain), key)
-          : await dnsResolveShodan(ctx, String(args.hostnames), key)
-        res.ok = true
-        return res
-      } catch (error) {
-        return toolError('map_dns 失败', error)
-      }
+      })
     },
   })
 }

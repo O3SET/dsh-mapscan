@@ -1,7 +1,7 @@
 # MapScan DSH
 
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![version](https://img.shields.io/badge/version-1.4.0-brightgreen)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-1.5.0-brightgreen)](CHANGELOG.md)
 [![node](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=node.js)](package.json)
 [![CI](https://github.com/O3SET/dsh-mapscan/actions/workflows/ci.yml/badge.svg)](https://github.com/O3SET/dsh-mapscan/actions/workflows/ci.yml)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -33,21 +33,25 @@ MapScan 把它们封装成 6 个统一的动态工具，输出**归一化结果*
 - **按 Key 自动路由**：所有 platform 参数均可省略——只对**已填写 API Key 的平台**执行，未填写的自动跳过并列入 `skipped`
 - **零运行时依赖**：插件本体只使用 DSH 沙箱能力（`ctx.shell` 驱动的 curl + `web.fetch` 回退），无任何 npm 运行时依赖
 - **沙箱友好**：支持自定义 Header（ZoomEye `API-KEY`）与 POST（Quake `X-QuakeToken`）
-- **可测试**：模块化 ESM 源码 + node:test 单元/集成测试（73 例）+ 零依赖构建流水线
+- **可测试**：模块化 ESM 源码 + node:test 单元/集成测试（85 例）+ 零依赖构建流水线
 - **可并行**：只读工具声明 `isConcurrencySafe`；多平台场景内部并行、结果去重附摘要
+- **可取消**：转发调用方 `exec.signal` 到 shell 请求，用户中断可终止 curl 子进程
 
 ## Compatibility
 
-| 项目                       | 已验证版本                                                       | 验证日期   |
-| -------------------------- | ---------------------------------------------------------------- | ---------- |
-| DeepSeek Harness           | `@deepseek-ai/dsh` `0.1.0-rc.6`（DSH 动态 Cordis Plugin 运行时） | 2026-08-15 |
-| Node.js（构建/测试工具链） | 24.9.0（engines `>=22.19`；CI 矩阵 22/24/26）                    | 2026-08-15 |
-| 操作系统                   | Windows 11（curl 8.21；`ctx.shell`=pwsh 执行器）                 | 2026-08-15 |
+| 项目                         | 已验证版本                                                           | 验证日期   |
+| ---------------------------- | -------------------------------------------------------------------- | ---------- |
+| DeepSeek Harness             | `@deepseek-ai/dsh` **`0.2.0-rc.2`**（DSH 桌面版 V0.2.0-rc.2 运行时） | 2026-10-04 |
+| DeepSeek Harness（本地实测） | `@deepseek-ai/dsh-base` `0.1.7-rc.2`（脚本与端点端到端实测环境）     | 2026-10-04 |
+| Node.js（构建/测试工具链）   | 24.9.0（engines `>=22.19`；CI 矩阵 22/24/26）                        | 2026-10-04 |
+| 操作系统                     | Windows 11（curl 8.21；`ctx.shell`=pwsh 执行器）                     | 2026-10-04 |
+
+> **最低运行时要求：DSH ≥ `0.1.7-rc.2`。** DSH 在 `0.1.7-rc.2` 将 shell 执行从单步
+> `ctx.shell.run(request)` 改为两步 `resolve(request)` + `execute(spec)`，本插件 1.5.0 起按两步契约实现；
+> 在 `0.1.0-rc.6` 等旧版本上会因缺少 `execute` 抛出可读的契约错误而无法工作。
 
 平台 API 契约以各平台官方文档及 [projectdiscovery/uncover](https://github.com/projectdiscovery/uncover) 核对，见 [docs/API.md](docs/API.md)。
 兼容性结论只覆盖上述记录环境；生态收录目录的判定口径见 [docs/COMPLIANCE.md](docs/COMPLIANCE.md)。
-
-## Install / Uninstall
 
 ## Install / Uninstall
 

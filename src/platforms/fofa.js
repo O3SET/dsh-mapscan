@@ -39,7 +39,9 @@ export async function searchFofa(ctx, args, key) {
     size,
     total: data.size || results.length,
     returned: results.length,
-    credit: { consumed_fpoint: data.consumed_fpoint, rest_fpoint: data.rest_fpoint },
+    // 平台可能省略 rest_fpoint (实测 FOFA 仅回 consumed_fpoint), 必须剔除 undefined,
+    // 否则整条工具结果会被 DSH 的 lossless-JSON 校验判为无效
+    credit: clean({ consumed_fpoint: data.consumed_fpoint, rest_fpoint: data.rest_fpoint }),
     results,
   }
 }

@@ -49,3 +49,20 @@ export function pq(value) {
 export function textOf(collect) {
   return collect && typeof collect.text === 'string' ? collect.text : ''
 }
+
+/**
+ * 把任意值收敛为「无损 JSON」(lossless JSON)。
+ *
+ * DSH 的 dsh-tools 会以 snapshotJsonValue 校验工具返回值 (见 dsh-util-values):
+ * 出现 undefined / 函数 / symbol / bigint、非有限数字, 或 -0, 都会判定为
+ * "value is not lossless JSON" 并丢弃**整个**结果 (ToolOutputError)。
+ * 平台 API 常省略可选字段 (例如 FOFA 不返回 rest_fpoint), 直接透出就会踩中该规则,
+ * 故在工具输出边界统一收敛, 而不是逐个平台打补丁。
+ *
+ * 语义: undefined/函数/symbol -> 丢弃该字段(数组元素按 JSON 规则转 null); 非有限数字与 -0 -> 0;
+ * 其余原始值原样保留 (含 false/0/'')。以 JSON 往返实现, 天然消除循环引用的风险面。
+ */
+export function jsonSafe(value) {
+  if (value === undefined) return null
+  return JSON.parse(JSON.stringify(value))
+}

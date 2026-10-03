@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-04
+
+### Fixed
+
+- **适配 DSH 0.2.0-rc.2：`ctx.shell.run` 已移除，六个工具此前全部不可用**。DSH 在 `0.1.7-rc.2` 中把 shell 执行从单步 `run(request)` 改为两步契约 `resolve(request) -> ShellExecSpec` + `execute(spec) -> ShellExecution`，并在 `0.2.0-rc.2` 保持该形态。插件原调用 `ctx.shell.run(...)` 会直接抛 `TypeError`。现改为 `ctx.shell.resolve(request)` → `ctx.shell.execute(spec)` → `await handle.result()`，并按新版契约取 `{ exitCode, signal, timedOut, aborted, timeoutMs, stdout, stderr }`。
+- **不再由插件自造 `sandboxPolicy`**。`resolve()` 本来就会为请求盖上沙箱策略（`dsh-pwsh-sandbox` 在 `resolve` 内以 `request.sandboxPolicy ?? ctx.sandboxPolicy.resolve()` 填充），插件先前手工塞入 `danger-full-access` 属于绕过部署约束；现在策略完全交由宿主决定。
+- **沙箱后端缺失的升级重试按新契约实现**：`SandboxUnavailableError`（`code: SANDBOX_UNAVAILABLE`）在 `resolve`/`execute`/`result()` 任一步抛出时才以 `danger-full-access` 显式重试一次；错误识别不再只依赖英文错误文案（同时匹配 `code`、`name` 与文案）。
+- **契约不符时给出可读错误**：缺少 `resolve`/`execute` 时抛出说明所需契约与缺失方法的错误，而不是难以定位的 `ctx.shell.run is not a function`。
+- **修复 `map_search` 被 DSH 丢弃整个结果（实测发现）**：FOFA 只返回 `consumed_fpoint`、不返回 `rest_fpoint`，而 `searchFofa` 直接拼出 `credit: { consumed_fpoint, rest_fpoint: undefined }`。DSH 的 `dsh-tools` 以 `snapshotJsonValue` 校验工具返回值，**任何 `undefined`、非有限数字或 `-0` 都会判定为 "value is not lossless JSON" 并丢弃整个结果**，表现为 `tool "map_search" returned invalid output`。现于工具输出边界统一收敛为无损 JSON（`utils.jsonSafe`，在 `defineTool` 内对两个运行时同时生效），并让 `searchFofa` 的 `credit` 走 `clean()`。
+
+### Changed
+
+- **转发调用方取消信号**：六个工具的 `execute` 现接收 `exec` 并把它携带的 `signal` 下传到 shell 请求（单次调用内共享、调用之间隔离），用户中断时可终止 curl 子进程，而不是只能等 `timeoutMs`。
+- 沙箱后端缺失时的升级重试改用策略服务给出的**绝对**工作区根；取不到时省略 `workspaceRoot` 而不是传相对空串（相对路径会让沙箱 `canonicalPath` 抛错）。
+- 测试 mock 全部改写为 `0.2.0-rc.2` 真实契约（`resolve`/`execute`/`result()` 三段，`execute` 收到的是 `resolve` 产出的 spec，`defineTool` 包装层透传 `exec`）。此前 mock 直接实现了已移除的 `run` 且丢弃第二个参数，因此上述 API 断裂与信号缺失被测试完全掩盖——这是本次问题的根因。
+- 新增用例：三段调用顺序、插件不自造 `sandboxPolicy`、升级重试的绝对根、仅凭错误文案也能识别沙箱后端缺失、契约缺失的可读报错、`exec.signal` 端到端下传、缺可选字段时输出仍为无损 JSON。测试 77 → 86 例。
+
 ## [1.4.2] - 2026-08-15
 
 ### Fixed

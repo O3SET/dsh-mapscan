@@ -3,6 +3,7 @@
  * @module src/tools/map_search
  */
 import { PRIMARY_REFS, resolveKey } from '../lib/credentials.js'
+import { withSignal } from '../lib/http.js'
 import { summarize } from '../lib/summary.js'
 import { clampInt, trunc } from '../lib/utils.js'
 import { SEARCHERS } from '../platforms/index.js'
@@ -90,48 +91,50 @@ export function makeMapSearchTool(ctx) {
     output: JSON_OUTPUT,
     // 只读操作, 可与其他 map_* 工具并行 (多平台联合测绘)
     isConcurrencySafe: () => true,
-    async execute(args) {
+    async execute(args, exec) {
       const platform = args.platform || 'auto'
-      try {
-        let res
-        if (platform === 'all' || platform === 'auto') {
-          res = await searchUnion(ctx, args)
-        } else {
-          const key = await resolveKey(ctx, platform, args.key)
-          if (!key) {
-            return {
-              ok: false,
-              platform,
-              error:
-                `未配置 ${platform} 的 API Key。请先调用 map_set_keys 保存(参数 ${platform})，` +
-                `或设置环境变量 ${PRIMARY_REFS[platform]}`,
-            }
-          }
-          const pages = clampInt(args.pages, 1, 5, 1)
-          res = await searchPaged(ctx, platform, args, key, pages)
-        }
-        if (args.save) {
-          const fs = ctx.get('fs')
-          if (fs) {
-            try {
-              const target = await fs.resolve(String(args.save))
-              await fs.writeText(target, JSON.stringify(res, null, 2))
-              res.saved = fs.processPath(target)
-            } catch (error) {
-              res.save_error = trunc(error && error.message ? error.message : String(error), 200)
-            }
+      return await withSignal(ctx, exec && exec.signal, async () => {
+        try {
+          let res
+          if (platform === 'all' || platform === 'auto') {
+            res = await searchUnion(ctx, args)
           } else {
-            res.save_error = '当前环境无 fs 服务，跳过保存'
+            const key = await resolveKey(ctx, platform, args.key)
+            if (!key) {
+              return {
+                ok: false,
+                platform,
+                error:
+                  `未配置 ${platform} 的 API Key。请先调用 map_set_keys 保存(参数 ${platform})，` +
+                  `或设置环境变量 ${PRIMARY_REFS[platform]}`,
+              }
+            }
+            const pages = clampInt(args.pages, 1, 5, 1)
+            res = await searchPaged(ctx, platform, args, key, pages)
           }
+          if (args.save) {
+            const fs = ctx.get('fs')
+            if (fs) {
+              try {
+                const target = await fs.resolve(String(args.save))
+                await fs.writeText(target, JSON.stringify(res, null, 2))
+                res.saved = fs.processPath(target)
+              } catch (error) {
+                res.save_error = trunc(error && error.message ? error.message : String(error), 200)
+              }
+            } else {
+              res.save_error = '当前环境无 fs 服务，跳过保存'
+            }
+          }
+          res.ok = true
+          return res
+        } catch (error) {
+          const base = toolError('map_search 失败', error)
+          base.platform = platform
+          base.query = args.query
+          return base
         }
-        res.ok = true
-        return res
-      } catch (error) {
-        const base = toolError('map_search 失败', error)
-        base.platform = platform
-        base.query = args.query
-        return base
-      }
+      })
     },
   })
 }

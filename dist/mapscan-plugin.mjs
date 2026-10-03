@@ -57,56 +57,144 @@ function textOf(collect) {
   return collect && typeof collect.text === 'string' ? collect.text : ''
 }
 
+/**
+ * 把任意值收敛为「无损 JSON」(lossless JSON)。
+ *
+ * DSH 的 dsh-tools 会以 snapshotJsonValue 校验工具返回值 (见 dsh-util-values):
+ * 出现 undefined / 函数 / symbol / bigint、非有限数字, 或 -0, 都会判定为
+ * "value is not lossless JSON" 并丢弃**整个**结果 (ToolOutputError)。
+ * 平台 API 常省略可选字段 (例如 FOFA 不返回 rest_fpoint), 直接透出就会踩中该规则,
+ * 故在工具输出边界统一收敛, 而不是逐个平台打补丁。
+ *
+ * 语义: undefined/函数/symbol -> 丢弃该字段(数组元素按 JSON 规则转 null); 非有限数字与 -0 -> 0;
+ * 其余原始值原样保留 (含 false/0/'')。以 JSON 往返实现, 天然消除循环引用的风险面。
+ */
+function jsonSafe(value) {
+  if (value === undefined) return null
+  return JSON.parse(JSON.stringify(value))
+}
+
 
 // ---- src/lib/http.js ----
 /**
  * HTTP 层。
- * 沙箱约束: 动态插件没有全局 fetch (被运行时显式拦截), 且 ctx.web.fetch 仅支持纯 GET URL
- * (无自定义 Header / 无 POST)。因此以 curl.exe 经 ctx.shell (win32 下为 pwsh 执行器) 为主通道,
+ * 通道选择: 以 curl.exe 经 ctx.shell (win32 下为 pwsh 执行器) 为主通道,
  * 纯 GET 失败时回退 ctx.web.fetch。
+ * DSH 0.2.0-rc.2 起 ctx.shell 只暴露 resolve/execute 两步 (见 shellExecute)。
  * @module src/lib/http
  */
 
 /** curl -w 附加的 HTTP 状态码标记 */
 const HTTP_MARKER = '__MAPSCAN_HTTP__:'
 
+/** 当前调用的取消信号槽位 (见 withSignal) */
+const SIGNAL = Symbol('mapscan.abortSignal')
+
 /**
- * 解析 shell 执行策略。插件路径不携带会话, 部署默认策略缺失时执行器会因
- * `const { mode } = policy` 解构 undefined 崩溃; 这里显式解析, 仅在策略服务
- * 无法给出结果时按本环境实际生效策略回落为全访问, 不覆盖正常部署的约束。
+ * 在一次工具调用内挂载调用方的取消信号。
+ *
+ * dsh-tools 以 execute(args, exec) 调用工具, 并期望工具观察 exec.signal;
+ * 单次调用内并发发起的多个请求应共享同一信号, 而不同调用之间必须隔离
+ * (同一 ctx 上的并发调用不能互相污染), 故随调用临时挂载、finally 归还。
  */
-async function resolveShellPolicy(ctx) {
-  const sp = typeof ctx.get === 'function' ? ctx.get('sandboxPolicy') : undefined
-  if (sp && typeof sp.resolve === 'function') {
-    try {
-      const policy = await sp.resolve({})
-      if (policy && policy.mode) return policy
-    } catch (_error) {
-      // 继续回落
-    }
+async function withSignal(ctx, signal, body) {
+  if (!ctx || !signal || typeof signal !== 'object') return await body()
+  const previous = ctx[SIGNAL]
+  ctx[SIGNAL] = signal
+  try {
+    return await body()
+  } finally {
+    if (previous === undefined) delete ctx[SIGNAL]
+    else ctx[SIGNAL] = previous
   }
-  return { mode: 'danger-full-access', workspaceRoot: '' }
+}
+
+/** 读取当前调用的取消信号 (无则 undefined) */
+function currentSignal(ctx) {
+  const signal = ctx && ctx[SIGNAL]
+  return signal && signal.aborted !== true ? signal : undefined
+}
+
+/** 沙箱后端不可用错误: dsh-sandbox 的 SandboxUnavailableError(code=SANDBOX_UNAVAILABLE) */
+function isSandboxUnavailable(error) {
+  if (!error) return false
+  if (error.code === 'SANDBOX_UNAVAILABLE') return true
+  if (error.name === 'SandboxUnavailableError') return true
+  const msg = typeof error.message === 'string' ? error.message : String(error)
+  return /refusing to run the command unconfined|no sandbox backend is usable/.test(msg)
 }
 
 /**
- * 带策略执行 shell 命令。部署默认策略可能要求受限后端(workspace-write)而本机
- * 无可用沙箱后端导致执行器拒绝运行; 此时按会话实际生效策略(全访问)重试一次。
+ * 执行一次 shell 命令并返回 ShellRunResult。
+ *
+ * DSH 0.2.0-rc.2 的 ctx.shell 只有 resolve(request) -> ShellExecSpec 与
+ * execute(spec) -> ShellExecution 两步 (旧的 ctx.shell.run 便捷方法已移除):
+ *   - resolve 负责补齐 workdir/timeoutMs/onExpiry/stdoutMaxBytes, 并为请求盖上
+ *     sandboxPolicy (dsh-pwsh-sandbox 在 resolve 内完成, 缺失时执行器解构会崩);
+ *   - execute 返回进程句柄, 必须 await handle.result() 才拿到终态结果。
+ * 因此请求只能交给 resolve, 插件不自行拼装 spec 或 sandboxPolicy。
+ *
+ * @returns {Promise<{exitCode: number|null, signal: unknown, timedOut: boolean,
+ *   aborted: boolean, timeoutMs: number, stdout: unknown, stderr: unknown}>}
+ */
+async function shellExecute(ctx, request) {
+  const spec = ctx.shell.resolve(request)
+  const handle = await ctx.shell.execute(spec)
+  return await handle.result()
+}
+
+/**
+ * 全访问升级重试所用的策略。workspaceRoot 必须是绝对路径 (dsh-sandbox 对受限模式
+ * 做 canonicalPath, 相对路径会抛错), 故向策略服务取当前工作区根; 取不到时省略该字段,
+ * 由沙箱层自行解析, 而不是塞入相对空串。
+ */
+function escalationPolicy(ctx) {
+  let workspaceRoot
+  try {
+    const sp = typeof ctx.get === 'function' ? ctx.get('sandboxPolicy') : undefined
+    const resolved = sp && typeof sp.resolve === 'function' ? sp.resolve() : undefined
+    if (
+      resolved &&
+      typeof resolved.workspaceRoot === 'string' &&
+      resolved.workspaceRoot.length > 0
+    ) {
+      workspaceRoot = resolved.workspaceRoot
+    }
+  } catch (_error) {
+    // 策略服务不可用: 省略 workspaceRoot
+  }
+  return workspaceRoot === undefined
+    ? { mode: 'danger-full-access' }
+    : { mode: 'danger-full-access', workspaceRoot }
+}
+
+/**
+ * 带沙箱策略执行 shell 命令。部署默认策略可能要求受限后端而本机无可用沙箱后端,
+ * 执行器会 fail-closed 拒绝运行 (SandboxUnavailableError); 此时按全访问显式覆盖
+ * 重试一次——升级只发生在策略服务之外的后端缺失场景, 不覆盖正常部署的约束。
  */
 async function shellRunWithPolicy(ctx, request) {
+  assertShellContract(ctx)
   try {
-    return await ctx.shell.run({
-      ...request,
-      sandboxPolicy: await resolveShellPolicy(ctx),
-    })
+    return await shellExecute(ctx, request)
   } catch (error) {
-    const msg = error && error.message ? error.message : String(error)
-    if (/refusing to run the command unconfined|no sandbox backend is usable/.test(msg)) {
-      return await ctx.shell.run({
-        ...request,
-        sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: '' },
-      })
-    }
-    throw error
+    if (!isSandboxUnavailable(error)) throw error
+    return await shellExecute(ctx, { ...request, sandboxPolicy: escalationPolicy(ctx) })
+  }
+}
+
+/**
+ * 校验宿主 ctx.shell 契约。缺失或形态不符时抛出可读错误, 避免退化成
+ * 难以定位的 `ctx.shell.run is not a function`。
+ */
+function assertShellContract(ctx) {
+  const shell = ctx && ctx.shell
+  if (!shell || typeof shell.resolve !== 'function' || typeof shell.execute !== 'function') {
+    throw new Error(
+      'DSH shell 服务契约不符: 需要 ctx.shell.resolve(request) 与 ctx.shell.execute(spec) ' +
+        '(DeepSeek Harness >= 0.1.7); 当前 ctx.shell ' +
+        (shell ? `缺少 ${typeof shell.resolve !== 'function' ? 'resolve' : 'execute'}` : '不存在'),
+    )
   }
 }
 
@@ -139,6 +227,8 @@ async function curlJson(ctx, url, options = {}) {
     command: cmd,
     timeoutMs: (timeoutSec + 10) * 1000,
     stdoutMaxBytes: 4194304,
+    // 转发调用方取消信号: 用户中断时可终止 curl 子进程, 而不是只能等 timeoutMs
+    ...(currentSignal(ctx) ? { signal: currentSignal(ctx) } : {}),
   })
 
   const out = textOf(res.stdout)
@@ -421,9 +511,18 @@ function summarize(results) {
  * @module src/lib/runtime
  */
 
+/**
+ * 包一层输出收敛: 工具返回值必须是无损 JSON (undefined / 非有限数 / -0 会让 DSH 丢弃整个
+ * 结果, 见 utils.jsonSafe)。两个运行时都套用, 保证行为一致。
+ */
+function withJsonSafe(execute) {
+  return async (args, exec) => jsonSafe(await execute(args, exec))
+}
+
 /** 构造工具定义: 沙箱走官方 DSL 编译, Loader 下直接透传 (schema 由调用方给出原始 JSON Schema) */
 function defineTool(options) {
-  if (typeof harness !== 'undefined') return harness.defineTool(options)
+  const execute = withJsonSafe(options.execute)
+  if (typeof harness !== 'undefined') return harness.defineTool({ ...options, execute })
   return {
     name: options.name,
     description: options.description,
@@ -432,7 +531,7 @@ function defineTool(options) {
     ...(typeof options.isConcurrencySafe === 'function'
       ? { isConcurrencySafe: options.isConcurrencySafe }
       : {}),
-    execute: options.execute,
+    execute,
   }
 }
 
@@ -482,7 +581,9 @@ async function searchFofa(ctx, args, key) {
     size,
     total: data.size || results.length,
     returned: results.length,
-    credit: { consumed_fpoint: data.consumed_fpoint, rest_fpoint: data.rest_fpoint },
+    // 平台可能省略 rest_fpoint (实测 FOFA 仅回 consumed_fpoint), 必须剔除 undefined,
+    // 否则整条工具结果会被 DSH 的 lossless-JSON 校验判为无效
+    credit: clean({ consumed_fpoint: data.consumed_fpoint, rest_fpoint: data.rest_fpoint }),
     results,
   }
 }
@@ -1324,48 +1425,50 @@ function makeMapSearchTool(ctx) {
     output: JSON_OUTPUT,
     // 只读操作, 可与其他 map_* 工具并行 (多平台联合测绘)
     isConcurrencySafe: () => true,
-    async execute(args) {
+    async execute(args, exec) {
       const platform = args.platform || 'auto'
-      try {
-        let res
-        if (platform === 'all' || platform === 'auto') {
-          res = await searchUnion(ctx, args)
-        } else {
-          const key = await resolveKey(ctx, platform, args.key)
-          if (!key) {
-            return {
-              ok: false,
-              platform,
-              error:
-                `未配置 ${platform} 的 API Key。请先调用 map_set_keys 保存(参数 ${platform})，` +
-                `或设置环境变量 ${PRIMARY_REFS[platform]}`,
-            }
-          }
-          const pages = clampInt(args.pages, 1, 5, 1)
-          res = await searchPaged(ctx, platform, args, key, pages)
-        }
-        if (args.save) {
-          const fs = ctx.get('fs')
-          if (fs) {
-            try {
-              const target = await fs.resolve(String(args.save))
-              await fs.writeText(target, JSON.stringify(res, null, 2))
-              res.saved = fs.processPath(target)
-            } catch (error) {
-              res.save_error = trunc(error && error.message ? error.message : String(error), 200)
-            }
+      return await withSignal(ctx, exec && exec.signal, async () => {
+        try {
+          let res
+          if (platform === 'all' || platform === 'auto') {
+            res = await searchUnion(ctx, args)
           } else {
-            res.save_error = '当前环境无 fs 服务，跳过保存'
+            const key = await resolveKey(ctx, platform, args.key)
+            if (!key) {
+              return {
+                ok: false,
+                platform,
+                error:
+                  `未配置 ${platform} 的 API Key。请先调用 map_set_keys 保存(参数 ${platform})，` +
+                  `或设置环境变量 ${PRIMARY_REFS[platform]}`,
+              }
+            }
+            const pages = clampInt(args.pages, 1, 5, 1)
+            res = await searchPaged(ctx, platform, args, key, pages)
           }
+          if (args.save) {
+            const fs = ctx.get('fs')
+            if (fs) {
+              try {
+                const target = await fs.resolve(String(args.save))
+                await fs.writeText(target, JSON.stringify(res, null, 2))
+                res.saved = fs.processPath(target)
+              } catch (error) {
+                res.save_error = trunc(error && error.message ? error.message : String(error), 200)
+              }
+            } else {
+              res.save_error = '当前环境无 fs 服务，跳过保存'
+            }
+          }
+          res.ok = true
+          return res
+        } catch (error) {
+          const base = toolError('map_search 失败', error)
+          base.platform = platform
+          base.query = args.query
+          return base
         }
-        res.ok = true
-        return res
-      } catch (error) {
-        const base = toolError('map_search 失败', error)
-        base.platform = platform
-        base.query = args.query
-        return base
-      }
+      })
     },
   })
 }
@@ -1425,57 +1528,59 @@ function makeMapIpDetailTool(ctx) {
     output: JSON_OUTPUT,
     // 只读操作, 可与其他 map_* 工具并行
     isConcurrencySafe: () => true,
-    async execute(args) {
-      try {
-        const ip = String(args.ip)
-        const platform = args.platform || 'auto'
+    async execute(args, exec) {
+      return await withSignal(ctx, exec && exec.signal, async () => {
+        try {
+          const ip = String(args.ip)
+          const platform = args.platform || 'auto'
 
-        if (platform !== 'auto') {
-          const key = await resolveKey(ctx, platform, args.key)
-          if (!key) {
+          if (platform !== 'auto') {
+            const key = await resolveKey(ctx, platform, args.key)
+            if (!key) {
+              return {
+                ok: false,
+                platform,
+                error: `未配置 ${platform} 的 API Key。请先调用 map_set_keys 或设置环境变量`,
+              }
+            }
+            const res = await detailOne(ctx, platform, ip, key, args.honeyscore)
+            res.ok = true
+            return res
+          }
+
+          // 自动模式: 只使用已填写 Key 的平台, 未配置自动跳过
+          const entries = await configuredPlatforms(ctx, DETAIL_CANDIDATES)
+          if (entries.length === 0) {
             return {
               ok: false,
-              platform,
-              error: `未配置 ${platform} 的 API Key。请先调用 map_set_keys 或设置环境变量`,
+              error: 'fofa 与 shodan 都未配置 API Key。请先调用 map_set_keys 或设置环境变量',
             }
           }
-          const res = await detailOne(ctx, platform, ip, key, args.honeyscore)
-          res.ok = true
-          return res
-        }
-
-        // 自动模式: 只使用已填写 Key 的平台, 未配置自动跳过
-        const entries = await configuredPlatforms(ctx, DETAIL_CANDIDATES)
-        if (entries.length === 0) {
-          return {
-            ok: false,
-            error: 'fofa 与 shodan 都未配置 API Key。请先调用 map_set_keys 或设置环境变量',
-          }
-        }
-        const settled = await Promise.all(
-          entries.map(async ([p, key]) => {
-            try {
-              return {
-                platform: p,
-                ok: true,
-                result: await detailOne(ctx, p, ip, key, args.honeyscore),
+          const settled = await Promise.all(
+            entries.map(async ([p, key]) => {
+              try {
+                return {
+                  platform: p,
+                  ok: true,
+                  result: await detailOne(ctx, p, ip, key, args.honeyscore),
+                }
+              } catch (error) {
+                return {
+                  platform: p,
+                  ok: false,
+                  error: trunc(error && error.message ? error.message : String(error), 200),
+                }
               }
-            } catch (error) {
-              return {
-                platform: p,
-                ok: false,
-                error: trunc(error && error.message ? error.message : String(error), 200),
-              }
-            }
-          }),
-        )
-        const platforms = {}
-        for (const s of settled) platforms[s.platform] = s.ok ? s.result : { error: s.error }
-        const skipped = DETAIL_CANDIDATES.filter((p) => !platforms[p])
-        return { ok: true, platform: 'auto', ip, platforms, skipped }
-      } catch (error) {
-        return toolError('map_ip_detail 失败', error)
-      }
+            }),
+          )
+          const platforms = {}
+          for (const s of settled) platforms[s.platform] = s.ok ? s.result : { error: s.error }
+          const skipped = DETAIL_CANDIDATES.filter((p) => !platforms[p])
+          return { ok: true, platform: 'auto', ip, platforms, skipped }
+        } catch (error) {
+          return toolError('map_ip_detail 失败', error)
+        }
+      })
     },
   })
 }
@@ -1526,52 +1631,54 @@ function makeMapStatsTool(ctx) {
     output: JSON_OUTPUT,
     // 只读操作, 可与其他 map_* 工具并行
     isConcurrencySafe: () => true,
-    async execute(args) {
-      try {
-        const platform = args.platform || 'auto'
+    async execute(args, exec) {
+      return await withSignal(ctx, exec && exec.signal, async () => {
+        try {
+          const platform = args.platform || 'auto'
 
-        if (platform !== 'auto') {
-          const key = await resolveKey(ctx, platform, args.key)
-          if (!key) {
-            return {
-              ok: false,
-              platform,
-              error: `未配置 ${platform} 的 API Key。请先调用 map_set_keys 或设置环境变量`,
-            }
-          }
-          const res = await STATSERS[platform](ctx, args, key)
-          res.ok = true
-          return res
-        }
-
-        // 自动模式: 只使用已填写 Key 的平台, 未配置自动跳过
-        const entries = await configuredPlatforms(ctx, STATS_CANDIDATES)
-        if (entries.length === 0) {
-          return {
-            ok: false,
-            error: 'fofa 与 shodan 都未配置 API Key。请先调用 map_set_keys 或设置环境变量',
-          }
-        }
-        const settled = await Promise.all(
-          entries.map(async ([p, key]) => {
-            try {
-              return { platform: p, ok: true, result: await STATSERS[p](ctx, args, key) }
-            } catch (error) {
+          if (platform !== 'auto') {
+            const key = await resolveKey(ctx, platform, args.key)
+            if (!key) {
               return {
-                platform: p,
                 ok: false,
-                error: trunc(error && error.message ? error.message : String(error), 200),
+                platform,
+                error: `未配置 ${platform} 的 API Key。请先调用 map_set_keys 或设置环境变量`,
               }
             }
-          }),
-        )
-        const platforms = {}
-        for (const s of settled) platforms[s.platform] = s.ok ? s.result : { error: s.error }
-        const skipped = STATS_CANDIDATES.filter((p) => !platforms[p])
-        return { ok: true, platform: 'auto', query: args.query, platforms, skipped }
-      } catch (error) {
-        return toolError('map_stats 失败', error)
-      }
+            const res = await STATSERS[platform](ctx, args, key)
+            res.ok = true
+            return res
+          }
+
+          // 自动模式: 只使用已填写 Key 的平台, 未配置自动跳过
+          const entries = await configuredPlatforms(ctx, STATS_CANDIDATES)
+          if (entries.length === 0) {
+            return {
+              ok: false,
+              error: 'fofa 与 shodan 都未配置 API Key。请先调用 map_set_keys 或设置环境变量',
+            }
+          }
+          const settled = await Promise.all(
+            entries.map(async ([p, key]) => {
+              try {
+                return { platform: p, ok: true, result: await STATSERS[p](ctx, args, key) }
+              } catch (error) {
+                return {
+                  platform: p,
+                  ok: false,
+                  error: trunc(error && error.message ? error.message : String(error), 200),
+                }
+              }
+            }),
+          )
+          const platforms = {}
+          for (const s of settled) platforms[s.platform] = s.ok ? s.result : { error: s.error }
+          const skipped = STATS_CANDIDATES.filter((p) => !platforms[p])
+          return { ok: true, platform: 'auto', query: args.query, platforms, skipped }
+        } catch (error) {
+          return toolError('map_stats 失败', error)
+        }
+      })
     },
   })
 }
@@ -1610,52 +1717,54 @@ function makeMapAccountTool(ctx) {
     output: JSON_OUTPUT,
     // 只读操作, 可与其他 map_* 工具并行
     isConcurrencySafe: () => true,
-    async execute(args) {
-      try {
-        const platform = args.platform || 'auto'
+    async execute(args, exec) {
+      return await withSignal(ctx, exec && exec.signal, async () => {
+        try {
+          const platform = args.platform || 'auto'
 
-        if (platform !== 'auto') {
-          const key = await resolveKey(ctx, platform, args.key)
-          if (!key) {
-            return {
-              ok: false,
-              platform,
-              error: `未配置 ${platform} 的 API Key。请先调用 map_set_keys 或设置环境变量`,
-            }
-          }
-          const res = await ACCOUNTERS[platform](ctx, key)
-          res.ok = true
-          return res
-        }
-
-        // 自动模式: 只使用已填写 Key 的平台, 未配置自动跳过
-        const entries = await configuredPlatforms(ctx, PLATFORMS)
-        if (entries.length === 0) {
-          return {
-            ok: false,
-            error: '所有平台都未配置 API Key。请先调用 map_set_keys 或设置环境变量',
-          }
-        }
-        const settled = await Promise.all(
-          entries.map(async ([p, key]) => {
-            try {
-              return { platform: p, ok: true, result: await ACCOUNTERS[p](ctx, key) }
-            } catch (error) {
+          if (platform !== 'auto') {
+            const key = await resolveKey(ctx, platform, args.key)
+            if (!key) {
               return {
-                platform: p,
                 ok: false,
-                error: trunc(error && error.message ? error.message : String(error), 200),
+                platform,
+                error: `未配置 ${platform} 的 API Key。请先调用 map_set_keys 或设置环境变量`,
               }
             }
-          }),
-        )
-        const platforms = {}
-        for (const s of settled) platforms[s.platform] = s.ok ? s.result : { error: s.error }
-        const skipped = PLATFORMS.filter((p) => !platforms[p])
-        return { ok: true, platform: 'auto', platforms, skipped }
-      } catch (error) {
-        return toolError('map_account 失败', error)
-      }
+            const res = await ACCOUNTERS[platform](ctx, key)
+            res.ok = true
+            return res
+          }
+
+          // 自动模式: 只使用已填写 Key 的平台, 未配置自动跳过
+          const entries = await configuredPlatforms(ctx, PLATFORMS)
+          if (entries.length === 0) {
+            return {
+              ok: false,
+              error: '所有平台都未配置 API Key。请先调用 map_set_keys 或设置环境变量',
+            }
+          }
+          const settled = await Promise.all(
+            entries.map(async ([p, key]) => {
+              try {
+                return { platform: p, ok: true, result: await ACCOUNTERS[p](ctx, key) }
+              } catch (error) {
+                return {
+                  platform: p,
+                  ok: false,
+                  error: trunc(error && error.message ? error.message : String(error), 200),
+                }
+              }
+            }),
+          )
+          const platforms = {}
+          for (const s of settled) platforms[s.platform] = s.ok ? s.result : { error: s.error }
+          const skipped = PLATFORMS.filter((p) => !platforms[p])
+          return { ok: true, platform: 'auto', platforms, skipped }
+        } catch (error) {
+          return toolError('map_account 失败', error)
+        }
+      })
     },
   })
 }
@@ -1692,28 +1801,30 @@ function makeMapDnsTool(ctx) {
     output: JSON_OUTPUT,
     // 只读操作, 可与其他 map_* 工具并行
     isConcurrencySafe: () => true,
-    async execute(args) {
-      try {
-        const key = await resolveKey(ctx, 'shodan', args.key)
-        if (!key) {
-          return {
-            ok: false,
-            error:
-              `未配置 shodan 的 API Key。请先调用 map_set_keys 或设置环境变量 ` +
-              PRIMARY_REFS.shodan,
+    async execute(args, exec) {
+      return await withSignal(ctx, exec && exec.signal, async () => {
+        try {
+          const key = await resolveKey(ctx, 'shodan', args.key)
+          if (!key) {
+            return {
+              ok: false,
+              error:
+                `未配置 shodan 的 API Key。请先调用 map_set_keys 或设置环境变量 ` +
+                PRIMARY_REFS.shodan,
+            }
           }
+          if (!args.hostnames && !args.domain) {
+            return { ok: false, error: 'hostnames 与 domain 必须提供一个 (批量解析/子域枚举)' }
+          }
+          const res = args.domain
+            ? await dnsDomainShodan(ctx, String(args.domain), key)
+            : await dnsResolveShodan(ctx, String(args.hostnames), key)
+          res.ok = true
+          return res
+        } catch (error) {
+          return toolError('map_dns 失败', error)
         }
-        if (!args.hostnames && !args.domain) {
-          return { ok: false, error: 'hostnames 与 domain 必须提供一个 (批量解析/子域枚举)' }
-        }
-        const res = args.domain
-          ? await dnsDomainShodan(ctx, String(args.domain), key)
-          : await dnsResolveShodan(ctx, String(args.hostnames), key)
-        res.ok = true
-        return res
-      } catch (error) {
-        return toolError('map_dns 失败', error)
-      }
+      })
     },
   })
 }
@@ -1751,12 +1862,14 @@ function makeMapSetKeysTool(ctx) {
       required: [],
     },
     output: JSON_OUTPUT,
-    async execute(args) {
-      try {
-        return await setKeys(ctx, args)
-      } catch (error) {
-        return toolError('map_set_keys 失败', error)
-      }
+    async execute(args, exec) {
+      return await withSignal(ctx, exec && exec.signal, async () => {
+        try {
+          return await setKeys(ctx, args)
+        } catch (error) {
+          return toolError('map_set_keys 失败', error)
+        }
+      })
     },
   })
 }

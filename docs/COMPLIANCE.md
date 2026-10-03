@@ -20,16 +20,16 @@
 
 ## 二、radar 最低收录条件（本仓库对照）
 
-| #   | 条件                                                      | 本仓库状态                                                                 |
-| --- | --------------------------------------------------------- | -------------------------------------------------------------------------- |
-| 1   | 仓库公开可访问 + 添加 `dsh-plugin` topic                  | ⏳ 推送后手动添加（发布清单第 1 步）                                       |
-| 2   | 根目录合法 `package.json` + 非空 `name`                   | ✅ `name: mapscan-dsh`                                                     |
-| 3   | 提供 `main` / `exports` 或明确的 `dsh` 集成入口           | ✅ `main`/`exports` → `src/index.js`；`dsh.entry` → `dist/mapscan-host.js` |
-| 4   | README 说明做什么、如何安装、如何卸载、最小使用示例       | ✅ 按 9 章节表重构（Overview→License & security）                          |
-| 5   | 运行时依赖在 `dependencies` / `peerDependencies` 显式声明 | ✅ `dependencies: {}`（显式声明零 npm 运行时依赖；宿主为 DSH 0.1.0-rc.6）  |
-| 6   | 声明支持的 DSH 版本、快照或已验证 commit                  | ✅ README Compatibility 表（DSH 0.1.0-rc.6 / 2026-08-15）                  |
-| 7   | 提供许可证；不提交密钥/个人信息/私有内容                  | ✅ MIT + SECURITY.md 约定                                                  |
-| 8   | 包名命名空间归自己控制，不占用 `@dsh-external/*`          | ✅ unscoped `mapscan-dsh`                                                  |
+| #   | 条件                                                      | 本仓库状态                                                                   |
+| --- | --------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| 1   | 仓库公开可访问 + 添加 `dsh-plugin` topic                  | ⏳ 推送后手动添加（发布清单第 1 步）                                         |
+| 2   | 根目录合法 `package.json` + 非空 `name`                   | ✅ `name: mapscan-dsh`                                                       |
+| 3   | 提供 `main` / `exports` 或明确的 `dsh` 集成入口           | ✅ `main`/`exports` → `src/index.js`；`dsh.entry` → `dist/mapscan-host.js`   |
+| 4   | README 说明做什么、如何安装、如何卸载、最小使用示例       | ✅ 按 9 章节表重构（Overview→License & security）                            |
+| 5   | 运行时依赖在 `dependencies` / `peerDependencies` 显式声明 | ✅ `dependencies: {}`（显式声明零 npm 运行时依赖；宿主为 DSH 0.2.0-rc.2）    |
+| 6   | 声明支持的 DSH 版本、快照或已验证 commit                  | ✅ README Compatibility 表（DSH 0.2.0-rc.2 / 2026-10-04；最低 ≥ 0.1.7-rc.2） |
+| 7   | 提供许可证；不提交密钥/个人信息/私有内容                  | ✅ MIT + SECURITY.md 约定                                                    |
+| 8   | 包名命名空间归自己控制，不占用 `@dsh-external/*`          | ✅ unscoped `mapscan-dsh`                                                    |
 
 radar 判定层级：**L0 发现（topic）→ L1 清单（package.json/入口）→ L2 静态兼容 → L3 编译实验 → L4 运行实测（k8s agent 实测最小任务）**。
 「收录 ≠ 兼容 ≠ 可用 ≠ 安全审计」，四个结论都须同时看：插件 commit、mainline commit、测试日期、测试层级。
@@ -57,8 +57,9 @@ radar 判定层级：**L0 发现（topic）→ L1 清单（package.json/入口�
 
 ```text
 ## 测试环境
-- 插件: mapscan-dsh v1.4.0 (commit <发布 commit>)
-- DSH: @deepseek-ai/dsh 0.1.0-rc.6 (2026-08-15 官方快照)
+- 插件: mapscan-dsh v1.5.0 (commit <发布 commit>)
+- DSH: @deepseek-ai/dsh 0.2.0-rc.2 (2026-10-04；最低要求 ≥ 0.1.7-rc.2)
+- 本地实测: @deepseek-ai/dsh-base 0.1.7-rc.2 (contract 与 0.2.0-rc.2 一致)
 - OS: Windows 11; Node: v24.9.0; curl: 8.21
 
 ## 测试层级与结果

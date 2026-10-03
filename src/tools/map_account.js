@@ -4,6 +4,7 @@
  * @module src/tools/map_account
  */
 import { configuredPlatforms, resolveKey } from '../lib/credentials.js'
+import { withSignal } from '../lib/http.js'
 import { PLATFORMS, trunc } from '../lib/utils.js'
 import { ACCOUNTERS } from '../platforms/index.js'
 import { JSON_OUTPUT, defineTool, toolError } from './common.js'
@@ -34,52 +35,54 @@ export function makeMapAccountTool(ctx) {
     output: JSON_OUTPUT,
     // 只读操作, 可与其他 map_* 工具并行
     isConcurrencySafe: () => true,
-    async execute(args) {
-      try {
-        const platform = args.platform || 'auto'
+    async execute(args, exec) {
+      return await withSignal(ctx, exec && exec.signal, async () => {
+        try {
+          const platform = args.platform || 'auto'
 
-        if (platform !== 'auto') {
-          const key = await resolveKey(ctx, platform, args.key)
-          if (!key) {
-            return {
-              ok: false,
-              platform,
-              error: `未配置 ${platform} 的 API Key。请先调用 map_set_keys 或设置环境变量`,
-            }
-          }
-          const res = await ACCOUNTERS[platform](ctx, key)
-          res.ok = true
-          return res
-        }
-
-        // 自动模式: 只使用已填写 Key 的平台, 未配置自动跳过
-        const entries = await configuredPlatforms(ctx, PLATFORMS)
-        if (entries.length === 0) {
-          return {
-            ok: false,
-            error: '所有平台都未配置 API Key。请先调用 map_set_keys 或设置环境变量',
-          }
-        }
-        const settled = await Promise.all(
-          entries.map(async ([p, key]) => {
-            try {
-              return { platform: p, ok: true, result: await ACCOUNTERS[p](ctx, key) }
-            } catch (error) {
+          if (platform !== 'auto') {
+            const key = await resolveKey(ctx, platform, args.key)
+            if (!key) {
               return {
-                platform: p,
                 ok: false,
-                error: trunc(error && error.message ? error.message : String(error), 200),
+                platform,
+                error: `未配置 ${platform} 的 API Key。请先调用 map_set_keys 或设置环境变量`,
               }
             }
-          }),
-        )
-        const platforms = {}
-        for (const s of settled) platforms[s.platform] = s.ok ? s.result : { error: s.error }
-        const skipped = PLATFORMS.filter((p) => !platforms[p])
-        return { ok: true, platform: 'auto', platforms, skipped }
-      } catch (error) {
-        return toolError('map_account 失败', error)
-      }
+            const res = await ACCOUNTERS[platform](ctx, key)
+            res.ok = true
+            return res
+          }
+
+          // 自动模式: 只使用已填写 Key 的平台, 未配置自动跳过
+          const entries = await configuredPlatforms(ctx, PLATFORMS)
+          if (entries.length === 0) {
+            return {
+              ok: false,
+              error: '所有平台都未配置 API Key。请先调用 map_set_keys 或设置环境变量',
+            }
+          }
+          const settled = await Promise.all(
+            entries.map(async ([p, key]) => {
+              try {
+                return { platform: p, ok: true, result: await ACCOUNTERS[p](ctx, key) }
+              } catch (error) {
+                return {
+                  platform: p,
+                  ok: false,
+                  error: trunc(error && error.message ? error.message : String(error), 200),
+                }
+              }
+            }),
+          )
+          const platforms = {}
+          for (const s of settled) platforms[s.platform] = s.ok ? s.result : { error: s.error }
+          const skipped = PLATFORMS.filter((p) => !platforms[p])
+          return { ok: true, platform: 'auto', platforms, skipped }
+        } catch (error) {
+          return toolError('map_account 失败', error)
+        }
+      })
     },
   })
 }
