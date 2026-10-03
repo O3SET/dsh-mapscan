@@ -13,6 +13,8 @@ export function makeMapSetKeysTool(ctx) {
       '持久化保存或查看各测绘平台的 API Key(存入凭证库，可被同名环境变量覆盖)。' +
       '参数: fofa/shodan/hunter/zoomeye/quake 传对应 Key; remove 传平台名数组以删除已存 Key; ' +
       '不带任何参数时仅查看当前配置状态。' +
+      'Key 解析优先级: 工具参数 key > 插件配置(设置页「插件」页的 MapScan 表单) > 环境变量/凭证库。' +
+      '若已在设置页填过 Key, 那里的值会优先生效, 本工具写入的凭证库条目将被掩盖。' +
       'Key 获取地址: fofa.info 个人中心、account.shodan.io、hunter.qianxin.com 个人中心、' +
       'zoomeye.org/profile、quake.360.net 个人中心。',
     parameters: {

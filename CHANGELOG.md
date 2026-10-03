@@ -5,6 +5,26 @@
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-04
+
+### Added
+
+- **支持在 DSH 设置页配置 API（图形界面）**：导出 `Config`（Standard Schema，`~standard.validate`），设置页「插件 → MapScan」会渲染出五个平台 Key + `timeoutSec` 的配置表单，无需再靠对话调 `map_set_keys`。
+  - Cordis 的 `resolveConfig` 无条件取 `Config['~standard'].validate(config)`，且不允许异步；没有该导出时插件在配置清单里显示为 `absent`（不可配置），设置页也就渲染不出表单。
+  - `cordis.patch.yml` 的 insert 行带上 `config:` 块，作为设置页表单的读写落点。
+- **Key 解析优先级**：工具参数 `key` > **插件 Config（设置页）** > 环境变量 / 凭证库 > 平台社区惯用环境变量名。设置页填过的值会掩盖凭证库条目。
+- `Config.timeoutSec`：单请求超时（秒），夹取 5~300；优先级为「**设置页 Config > 各平台默认调优 > 默认 30**」——用户显式设定的值覆盖平台适配器的默认值，否则该项形同虚设。
+
+### Changed
+
+- `map_set_keys` 的状态报告会区分来源：设置页填过的平台报「已配置 (来源: 插件配置 / 设置页表单)」，不再误报为「未配置」；工具描述与 hint 同步说明新的优先级链。
+- README 配置章节重写：设置页表单与对话/环境变量两条路径，并明确标注**设置页填写会把 Key 以明文写入 profile 的 `cordis.patch.yml`**（希望不落盘则改用凭证库/环境变量并保持表单为空）。
+- 新增测试：Config 的 Standard Schema 契约（含非法输入返回 `issues`、`validate` 非异步）、Config 生效优先级、空值回退、`timeoutSec` 传导到 shell 请求超时、bundle 补丁含 `config` 块。测试 87 → 90 例。
+
+### Fixed
+
+- 配置槽位改用 `Symbol.for('mapscan.config')`（全局符号注册表）而非模块级 `Symbol()`：模块级符号在 src/dist 双实例并存时会产生两个互不相等的键，导致「配置写进去了但读不到」。
+
 ## [1.5.1] - 2026-10-04
 
 ### Fixed

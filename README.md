@@ -120,34 +120,54 @@ map_account   { "platform": "fofa" }
 
 ## Configuration
 
-| 配置项                                                                                              | 默认           | 说明                                        |
-| --------------------------------------------------------------------------------------------------- | -------------- | ------------------------------------------- |
-| `fofa` / `shodan` / `hunter` / `zoomeye` / `quake` Key                                              | 未配置         | 经 `map_set_keys` 写入 DSH 凭证库（持久化） |
-| 环境变量 `MAPSCAN_*_API_KEY`                                                                        | —              | 与凭证库同名引用，环境变量优先              |
-| 环境变量 `FOFA_API_KEY` / `SHODAN_API_KEY` / `HUNTER_API_KEY` / `ZOOMEYE_API_KEY` / `QUAKE_API_KEY` | —              | 社区惯用名，次优先                          |
-| 工具参数 `key`                                                                                      | —              | 单次调用临时覆盖，不落盘                    |
-| `size`（每页条数）                                                                                  | 20（最大 100） | 各工具统一夹取                              |
+**方式一：设置页表单（推荐，图形界面）**
 
-敏感项只经凭证库/环境变量/单次参数注入，**不写任何配置文件**；Key 获取地址：fofa.info 个人中心、account.shodan.io、hunter.qianxin.com 个人中心、zoomeye.org/profile、quake.360.net 个人中心。
+设置 → 插件 → **MapScan** 卡片 → 配置：直接填写五个平台的 Key 与超时。
+
+该表单由插件的 `Config`（Standard Schema，见 [src/index.js](src/index.js)）驱动，值落在 profile 的
+`cordis.patch.yml` 中 `mapscan-dsh` 那一行的 `config:` 块里（见本仓库 [cordis.patch.yml](cordis.patch.yml)）。
+
+**方式二：对话里配置 / 环境变量**
+
+| 配置项                                                                                              | 默认           | 说明                                    |
+| --------------------------------------------------------------------------------------------------- | -------------- | --------------------------------------- |
+| 设置页 `fofa` / `shodan` / `hunter` / `zoomeye` / `quake`                                           | 未配置         | 插件 Config，明文保存在 profile 配置里  |
+| 设置页 `timeoutSec`                                                                                 | 30             | 单请求超时（秒），夹取 5~300            |
+| `map_set_keys` 参数                                                                                 | 未配置         | 写入 DSH 凭证库（持久化，不落配置文件） |
+| 环境变量 `MAPSCAN_*_API_KEY`                                                                        | —              | 与凭证库同名引用，环境变量优先          |
+| 环境变量 `FOFA_API_KEY` / `SHODAN_API_KEY` / `HUNTER_API_KEY` / `ZOOMEYE_API_KEY` / `QUAKE_API_KEY` | —              | 社区惯用名，次优先                      |
+| 工具参数 `key`                                                                                      | —              | 单次调用临时覆盖，不落盘                |
+| `size`（每页条数）                                                                                  | 20（最大 100） | 各工具统一夹取                          |
+
+**Key 解析优先级**：工具参数 `key` > 插件 Config（设置页）> 环境变量 / 凭证库 > 社区惯用环境变量名。
+即**设置页填过的值会掩盖凭证库条目**；想回到凭证库，请把设置页对应字段清空。
+
+> ⚠️ **落盘提示**：设置页填写方式会把 Key 以**明文**写入 profile 的 `cordis.patch.yml`。
+> 若不希望 Key 落盘，请改用 `map_set_keys`（凭证库）或环境变量，并保持设置页表单为空。
+> 其余敏感项不写任何配置文件。
+
+Key 获取地址：fofa.info 个人中心、account.shodan.io、hunter.qianxin.com 个人中心、zoomeye.org/profile、quake.360.net 个人中心。
 
 ## Permissions & data
 
 - **文件系统**：仅在 `map_search` 使用 `save` 参数时写入你指定的 JSON 文件路径（默认不写任何文件）
 - **网络**：仅访问五个平台官方 API 域名（fofa.info / api.shodan.io / hunter.qianxin.com / api.zoomeye.org / quake.360.net）
-- **凭据**：读取 `MAPSCAN_*` 与平台惯用名环境变量/凭证库条目；API Key 出现在子进程（curl）命令行中，属平台 API 的鉴权要求，注意本机进程列表可见性
+- **凭据**：读取设置页 Config、`MAPSCAN_*` 与平台惯用名环境变量/凭证库条目；API Key 出现在子进程（curl）命令行中，属平台 API 的鉴权要求，注意本机进程列表可见性
 - **数据**：查询结果仅返回给模型与会话，除 `save` 外不落盘
 - 插件为 Host-only 代码，在 DSH 沙箱内运行；安装第三方插件即代表信任其代码，请审阅 [源码](src/)（安全报告见 [SECURITY.md](SECURITY.md)）
 
 ## Troubleshooting
 
-| 现象                                 | 处理                                                                             |
-| ------------------------------------ | -------------------------------------------------------------------------------- |
-| `未配置 xxx 的 API Key`              | 先 `map_set_keys` 或设置环境变量；`map_set_keys` 无参查看状态                    |
-| `FOFA 返回错误: [-700] 账号无效`     | Key 错误/过期，到 fofa.info 个人中心核对                                         |
-| `响应不是 JSON (HTTP 401)`           | Shodan/ZoomEye/Quake 的 401 响应非 JSON，Key 无效时属正常提示，核对 Key          |
-| `Hunter 返回错误 code=401: 令牌过期` | 鹰图 Key 过期，重新生成；hunter 根域名 403 是 WAF 正常现象，仅 `/openApi/*` 可用 |
-| `HTTP 请求失败 (无响应体)`           | 目标平台不可达或超时；插件会附上 curl stderr 详情，检查网络/代理                 |
-| `未挂载凭证服务(credentials)`        | 当前 DSH 组合缺凭证提供方，改用环境变量注入 Key                                  |
+| 现象                                  | 处理                                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `未配置 xxx 的 API Key`               | 到设置页「插件 → MapScan」填 Key，或用 `map_set_keys`/环境变量；`map_set_keys` 无参查看状态 |
+| 设置页填了 Key 却不生效               | 优先级为「工具参数 > 设置页 Config > 凭证库」；设置页留空后才会回退凭证库。改完需重启 DSH   |
+| 设置页「插件」里没有 MapScan 的配置项 | 确认插件已装且被识别（见 Install 章节排错），并已**重启 DSH**——`Config` 在插件挂载时才注册  |
+| `FOFA 返回错误: [-700] 账号无效`      | Key 错误/过期，到 fofa.info 个人中心核对                                                    |
+| `响应不是 JSON (HTTP 401)`            | Shodan/ZoomEye/Quake 的 401 响应非 JSON，Key 无效时属正常提示，核对 Key                     |
+| `Hunter 返回错误 code=401: 令牌过期`  | 鹰图 Key 过期，重新生成；hunter 根域名 403 是 WAF 正常现象，仅 `/openApi/*` 可用            |
+| `HTTP 请求失败 (无响应体)`            | 目标平台不可达或超时；插件会附上 curl stderr 详情，检查网络/代理                            |
+| `未挂载凭证服务(credentials)`         | 当前 DSH 组合缺凭证提供方，改用环境变量注入 Key                                             |
 
 ## Development
 

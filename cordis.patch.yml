@@ -10,6 +10,23 @@
 #
 # 补丁语义提醒: loader 的 config 是**整块替换、绝不深合并**, 所以这里只做 insert,
 # 不覆写任何既有条目的 config, 避免误删 base 层的配置。
+#
+# `config` 即插件 Config 的当前值, 由设置页「插件」页的配置表单读写
+# (经 configEditor 服务落回本行)。值会以**明文**保存在 profile 的 package.json /
+# cordis.patch.yml 里; 若不想让 Key 落盘, 留空并改用凭证库 (map_set_keys) 或环境变量。
 - insert:
     - id: mapscan-dsh
       name: 'mapscan-dsh'
+      config:
+        # FOFA API Key (fofa.info 个人中心)
+        fofa: ''
+        # Shodan API Key (account.shodan.io)
+        shodan: ''
+        # 鹰图 Hunter API Key (hunter.qianxin.com 个人中心)
+        hunter: ''
+        # ZoomEye API-KEY (zoomeye.org/profile)
+        zoomeye: ''
+        # Quake Token (quake.360.net 个人中心)
+        quake: ''
+        # 可选: 单请求超时(秒), 留空用默认 30
+        timeoutSec: 30

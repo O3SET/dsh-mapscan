@@ -5,6 +5,7 @@
  * DSH 0.2.0-rc.2 起 ctx.shell 只暴露 resolve/execute 两步 (见 shellExecute)。
  * @module src/lib/http
  */
+import { configTimeoutSec } from './credentials.js'
 import { pq, textOf, trunc } from './utils.js'
 
 /** curl -w 附加的 HTTP 状态码标记 */
@@ -130,7 +131,9 @@ export function assertShellContract(ctx) {
  */
 export async function curlJson(ctx, url, options = {}) {
   const headers = options.headers || {}
-  const timeoutSec = options.timeoutSec || 30
+  // 单请求超时(秒), 优先级: 插件 Config.timeoutSec (用户在设置页显式设定) > 各平台调用的默认值 > 30
+  // 平台适配器传的 timeoutSec 属于「默认调优」, 用户显式配置应当能覆盖它, 否则该项形同虚设。
+  const timeoutSec = configTimeoutSec(ctx) || options.timeoutSec || 30
   // --retry 1: 对瞬时网络错误(连接被拒/超时)自动重试一次, 不重试 HTTP 4xx/5xx
   let cmd = `curl.exe -s -S --max-time ${timeoutSec} --retry 1 --retry-delay 1 --retry-connrefused`
   cmd += ` -H ${pq('Accept: application/json')}`

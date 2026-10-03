@@ -207,7 +207,9 @@ function assertShellContract(ctx) {
  */
 async function curlJson(ctx, url, options = {}) {
   const headers = options.headers || {}
-  const timeoutSec = options.timeoutSec || 30
+  // 单请求超时(秒), 优先级: 插件 Config.timeoutSec (用户在设置页显式设定) > 各平台调用的默认值 > 30
+  // 平台适配器传的 timeoutSec 属于「默认调优」, 用户显式配置应当能覆盖它, 否则该项形同虚设。
+  const timeoutSec = configTimeoutSec(ctx) || options.timeoutSec || 30
   // --retry 1: 对瞬时网络错误(连接被拒/超时)自动重试一次, 不重试 HTTP 4xx/5xx
   let cmd = `curl.exe -s -S --max-time ${timeoutSec} --retry 1 --retry-delay 1 --retry-connrefused`
   cmd += ` -H ${pq('Accept: application/json')}`
@@ -322,11 +324,49 @@ const FALLBACK_REFS = {
 }
 
 /**
- * 解析平台 Key, 优先级: 显式参数 > PRIMARY 引用 > FALLBACK 引用。
+ * 插件 Config 槽位。用 Symbol.for 取全局注册表符号而非模块级 Symbol():
+ * 同一进程内若模块被加载两次 (例如 src 与 dist 并存), 模块级 Symbol 会产生两个
+ * 互不相等的键, 配置就"写进去了但读不到"。全局注册表符号按字符串共享, 不受影响。
+ */
+const CONFIG = Symbol.for('mapscan.config')
+
+/**
+ * 挂载插件配置。校验已完成 (Cordis resolveConfig 调过 Config['~standard'].validate),
+ * 这里只做存储; 传空值时清空, 保证 update/卸载后不残留旧 Key。
+ */
+function setConfig(ctx, config) {
+  if (!ctx || typeof ctx !== 'object') return
+  const normalized = config && typeof config === 'object' ? config : {}
+  if (Object.keys(normalized).length === 0) delete ctx[CONFIG]
+  else ctx[CONFIG] = normalized
+}
+
+/** 读取插件 Config 里该平台的 Key (未配置返回 undefined) */
+function configKey(ctx, platform) {
+  const config = ctx && ctx[CONFIG]
+  const value = config && config[platform]
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+/** 读取插件 Config 里的单请求超时(秒), 未配置返回 undefined */
+function configTimeoutSec(ctx) {
+  const config = ctx && ctx[CONFIG]
+  const value = config && config.timeoutSec
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
+}
+
+/**
+ * 解析平台 Key, 优先级:
+ *   1. 工具参数 key (单次调用, 不落盘)
+ *   2. 插件 Config (DSH 设置页填写, 明文存在 profile 配置里)
+ *   3. 环境变量 / 凭证库 (PRIMARY 引用名)
+ *   4. 平台社区惯用环境变量名 (FALLBACK)
  * @returns {Promise<string | undefined>}
  */
 async function resolveKey(ctx, platform, explicit) {
   if (explicit && String(explicit).length > 0) return String(explicit)
+  const fromConfig = configKey(ctx, platform)
+  if (fromConfig) return fromConfig
   const creds = ctx.get('credentials')
   const refs = [PRIMARY_REFS[platform]].concat(FALLBACK_REFS[platform] || [])
   if (creds) {
@@ -394,26 +434,31 @@ async function setKeys(ctx, args) {
           `保存失败: ${trunc(_error && _error.message ? _error.message : String(_error), 200)}`
       }
     } else if (report[p] === undefined) {
-      try {
-        const info = await creds.describe(PRIMARY_REFS[p])
-        if (info && info.configured) {
-          let viaEnv = false
-          for (const ref of FALLBACK_REFS[p] || []) {
-            try {
-              const resolved = await creds.resolve(ref)
-              if (resolved && resolved.value) viaEnv = true
-            } catch (_error) {
-              // 忽略
+      // 配置表优先级高于凭证库: 设置页填过就必须如实报告, 否则会误导为「未配置」
+      if (configKey(ctx, p)) {
+        report[p] = '已配置 (来源: 插件配置 / 设置页表单)'
+      } else {
+        try {
+          const info = await creds.describe(PRIMARY_REFS[p])
+          if (info && info.configured) {
+            let viaEnv = false
+            for (const ref of FALLBACK_REFS[p] || []) {
+              try {
+                const resolved = await creds.resolve(ref)
+                if (resolved && resolved.value) viaEnv = true
+              } catch (_error) {
+                // 忽略
+              }
             }
+            report[p] =
+              `已配置 (来源: ${info.source || '未知'})` + (viaEnv ? '; 另有环境变量生效' : '')
+          } else {
+            report[p] = '未配置'
           }
+        } catch (_error) {
           report[p] =
-            `已配置 (来源: ${info.source || '未知'})` + (viaEnv ? '; 另有环境变量生效' : '')
-        } else {
-          report[p] = '未配置'
+            `状态未知: ${trunc(_error && _error.message ? _error.message : String(_error), 200)}`
         }
-      } catch (_error) {
-        report[p] =
-          `状态未知: ${trunc(_error && _error.message ? _error.message : String(_error), 200)}`
       }
     }
   }
@@ -421,8 +466,10 @@ async function setKeys(ctx, args) {
   return {
     ok: true,
     hint:
-      `Key 引用名: ${JSON.stringify(PRIMARY_REFS)}; ` +
-      '同名环境变量(或 FOFA_API_KEY / SHODAN_API_KEY / HUNTER_API_KEY / ZOOMEYE_API_KEY / QUAKE_API_KEY)会优先于凭证库生效',
+      'Key 解析优先级: 工具参数 key > 插件配置(设置页「插件」页 MapScan 表单) > 环境变量/凭证库。' +
+      `凭证库引用名: ${JSON.stringify(PRIMARY_REFS)}; ` +
+      '同名环境变量(或 FOFA_API_KEY / SHODAN_API_KEY / HUNTER_API_KEY / ZOOMEYE_API_KEY / QUAKE_API_KEY)优先于凭证库条目; ' +
+      '插件配置若已填写, 会掩盖以上两者。',
     status: report,
   }
 }
@@ -1843,6 +1890,8 @@ function makeMapSetKeysTool(ctx) {
       '持久化保存或查看各测绘平台的 API Key(存入凭证库，可被同名环境变量覆盖)。' +
       '参数: fofa/shodan/hunter/zoomeye/quake 传对应 Key; remove 传平台名数组以删除已存 Key; ' +
       '不带任何参数时仅查看当前配置状态。' +
+      'Key 解析优先级: 工具参数 key > 插件配置(设置页「插件」页的 MapScan 表单) > 环境变量/凭证库。' +
+      '若已在设置页填过 Key, 那里的值会优先生效, 本工具写入的凭证库条目将被掩盖。' +
       'Key 获取地址: fofa.info 个人中心、account.shodan.io、hunter.qianxin.com 个人中心、' +
       'zoomeye.org/profile、quake.360.net 个人中心。',
     parameters: {
@@ -1902,12 +1951,61 @@ function makeTools(ctx) {
  * @module src/index
  */
 
+/** 平台 Key 的配置字段 (插件 Config, 由 DSH 设置页渲染表单) */
+const CONFIG_KEY_FIELDS = ['fofa', 'shodan', 'hunter', 'zoomeye', 'quake']
+
+/**
+ * 插件配置 (Standard Schema)。
+ *
+ * Cordis 的 resolveConfig 无条件取 `Config['~standard'].validate(config)`:
+ *   - 必须有 `~standard` (普通字面量对象会在挂载时抛 TypeError 而永不生效);
+ *   - 不允许异步 (返回 Promise 会抛 "Async config validation is not supported");
+ *   - 返回 { value } 表示通过, { issues } 表示校验失败并阻止插件挂载。
+ *
+ * 每个字段用 `{ type, description }` 描述, DSH 设置页据此生成输入框。
+ * 留空即视为未配置, 回退到凭证库 / 环境变量 (见 lib/credentials.resolveKey)。
+ */
+const Config = {
+  '~standard': {
+    version: 1,
+    vendor: 'mapscan-dsh',
+    validate(value) {
+      if (value === undefined || value === null) return { value: {} }
+      if (typeof value !== 'object' || Array.isArray(value)) {
+        return { issues: [{ message: 'mapscan-dsh: config 必须是对象' }] }
+      }
+      const out = {}
+      for (const platform of CONFIG_KEY_FIELDS) {
+        const raw = value[platform]
+        if (raw === undefined || raw === null) continue
+        if (typeof raw !== 'string') {
+          return { issues: [{ message: `mapscan-dsh: config.${platform} 必须是字符串` }] }
+        }
+        const key = raw.trim()
+        if (key.length > 0) out[platform] = key
+      }
+      if (value.timeoutSec !== undefined && value.timeoutSec !== null) {
+        const seconds = Number(value.timeoutSec)
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+          return { issues: [{ message: 'mapscan-dsh: config.timeoutSec 必须是正数' }] }
+        }
+        // 与各平台单请求超时同一口径: 夹在 5~300 秒
+        out.timeoutSec = Math.min(300, Math.max(5, Math.floor(seconds)))
+      }
+      return { value: out }
+    },
+  },
+}
+
 /** MapScan 插件对象 */
 const plugin = {
   name: 'MapScan 网络空间测绘',
   // shell: HTTP 主通道; tools: 注册工具 (Loader 持久化路径经 ctx.tools.register, 必须显式注入)
   inject: ['shell', 'tools'],
-  apply(ctx) {
+  Config,
+  apply(ctx, config) {
+    // 配置挂到 ctx 的 symbol 槽位 (不污染 ctx 命名空间), 供 resolveKey 读取
+    setConfig(ctx, config)
     for (const tool of makeTools(ctx)) {
       // 每个注册 disposer 归属当前 Plugin Fiber, stop/update 时自动回收
       ctx.effect(() => registerTool(ctx, tool))

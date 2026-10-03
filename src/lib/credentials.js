@@ -24,11 +24,49 @@ export const FALLBACK_REFS = {
 }
 
 /**
- * 解析平台 Key, 优先级: 显式参数 > PRIMARY 引用 > FALLBACK 引用。
+ * 插件 Config 槽位。用 Symbol.for 取全局注册表符号而非模块级 Symbol():
+ * 同一进程内若模块被加载两次 (例如 src 与 dist 并存), 模块级 Symbol 会产生两个
+ * 互不相等的键, 配置就"写进去了但读不到"。全局注册表符号按字符串共享, 不受影响。
+ */
+const CONFIG = Symbol.for('mapscan.config')
+
+/**
+ * 挂载插件配置。校验已完成 (Cordis resolveConfig 调过 Config['~standard'].validate),
+ * 这里只做存储; 传空值时清空, 保证 update/卸载后不残留旧 Key。
+ */
+export function setConfig(ctx, config) {
+  if (!ctx || typeof ctx !== 'object') return
+  const normalized = config && typeof config === 'object' ? config : {}
+  if (Object.keys(normalized).length === 0) delete ctx[CONFIG]
+  else ctx[CONFIG] = normalized
+}
+
+/** 读取插件 Config 里该平台的 Key (未配置返回 undefined) */
+export function configKey(ctx, platform) {
+  const config = ctx && ctx[CONFIG]
+  const value = config && config[platform]
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+/** 读取插件 Config 里的单请求超时(秒), 未配置返回 undefined */
+export function configTimeoutSec(ctx) {
+  const config = ctx && ctx[CONFIG]
+  const value = config && config.timeoutSec
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
+}
+
+/**
+ * 解析平台 Key, 优先级:
+ *   1. 工具参数 key (单次调用, 不落盘)
+ *   2. 插件 Config (DSH 设置页填写, 明文存在 profile 配置里)
+ *   3. 环境变量 / 凭证库 (PRIMARY 引用名)
+ *   4. 平台社区惯用环境变量名 (FALLBACK)
  * @returns {Promise<string | undefined>}
  */
 export async function resolveKey(ctx, platform, explicit) {
   if (explicit && String(explicit).length > 0) return String(explicit)
+  const fromConfig = configKey(ctx, platform)
+  if (fromConfig) return fromConfig
   const creds = ctx.get('credentials')
   const refs = [PRIMARY_REFS[platform]].concat(FALLBACK_REFS[platform] || [])
   if (creds) {
@@ -96,26 +134,31 @@ export async function setKeys(ctx, args) {
           `保存失败: ${trunc(_error && _error.message ? _error.message : String(_error), 200)}`
       }
     } else if (report[p] === undefined) {
-      try {
-        const info = await creds.describe(PRIMARY_REFS[p])
-        if (info && info.configured) {
-          let viaEnv = false
-          for (const ref of FALLBACK_REFS[p] || []) {
-            try {
-              const resolved = await creds.resolve(ref)
-              if (resolved && resolved.value) viaEnv = true
-            } catch (_error) {
-              // 忽略
+      // 配置表优先级高于凭证库: 设置页填过就必须如实报告, 否则会误导为「未配置」
+      if (configKey(ctx, p)) {
+        report[p] = '已配置 (来源: 插件配置 / 设置页表单)'
+      } else {
+        try {
+          const info = await creds.describe(PRIMARY_REFS[p])
+          if (info && info.configured) {
+            let viaEnv = false
+            for (const ref of FALLBACK_REFS[p] || []) {
+              try {
+                const resolved = await creds.resolve(ref)
+                if (resolved && resolved.value) viaEnv = true
+              } catch (_error) {
+                // 忽略
+              }
             }
+            report[p] =
+              `已配置 (来源: ${info.source || '未知'})` + (viaEnv ? '; 另有环境变量生效' : '')
+          } else {
+            report[p] = '未配置'
           }
+        } catch (_error) {
           report[p] =
-            `已配置 (来源: ${info.source || '未知'})` + (viaEnv ? '; 另有环境变量生效' : '')
-        } else {
-          report[p] = '未配置'
+            `状态未知: ${trunc(_error && _error.message ? _error.message : String(_error), 200)}`
         }
-      } catch (_error) {
-        report[p] =
-          `状态未知: ${trunc(_error && _error.message ? _error.message : String(_error), 200)}`
       }
     }
   }
@@ -123,8 +166,10 @@ export async function setKeys(ctx, args) {
   return {
     ok: true,
     hint:
-      `Key 引用名: ${JSON.stringify(PRIMARY_REFS)}; ` +
-      '同名环境变量(或 FOFA_API_KEY / SHODAN_API_KEY / HUNTER_API_KEY / ZOOMEYE_API_KEY / QUAKE_API_KEY)会优先于凭证库生效',
+      'Key 解析优先级: 工具参数 key > 插件配置(设置页「插件」页 MapScan 表单) > 环境变量/凭证库。' +
+      `凭证库引用名: ${JSON.stringify(PRIMARY_REFS)}; ` +
+      '同名环境变量(或 FOFA_API_KEY / SHODAN_API_KEY / HUNTER_API_KEY / ZOOMEYE_API_KEY / QUAKE_API_KEY)优先于凭证库条目; ' +
+      '插件配置若已填写, 会掩盖以上两者。',
     status: report,
   }
 }

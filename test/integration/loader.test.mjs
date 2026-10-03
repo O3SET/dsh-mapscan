@@ -10,6 +10,8 @@ import { dirname, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
+import { resolveKey } from '../../src/lib/credentials.js'
+
 const PKG_PATH = fileURLToPath(new URL('../../package.json', import.meta.url))
 
 async function loadLoaderPlugin() {
@@ -18,8 +20,17 @@ async function loadLoaderPlugin() {
   return mod.default
 }
 
+/** mock 凭证库: 只实现插件用到的 resolve */
+function makeCreds(values) {
+  return {
+    async resolve(ref) {
+      return values[ref] === undefined ? undefined : { value: values[ref], source: 'file' }
+    },
+  }
+}
+
 /** mock 真实运行时 ctx (只含插件用到的能力) */
-function makeRealCtx() {
+function makeRealCtx({ credentials } = {}) {
   const registered = []
   return {
     registered,
@@ -33,7 +44,8 @@ function makeRealCtx() {
       const dispose = fn()
       if (typeof dispose === 'function') dispose()
     },
-    get() {
+    get(name) {
+      if (name === 'credentials') return credentials
       return undefined
     },
   }
@@ -93,6 +105,107 @@ test('Loader 变体: execute 在无 Key 时返回可操作错误', async () => {
   assert.match(res.error, /MAPSCAN_FOFA_API_KEY/)
 })
 
+test('Config 契约: 导出 Standard Schema 且行为正确', async () => {
+  // Cordis 的 resolveConfig 无条件取 Config['~standard'].validate(config);
+  // 没有它, DSH 设置页就渲染不出配置表单(插件卡片显示为不可配置)。
+  const plugin = await loadLoaderPlugin()
+  const schema = plugin.Config?.['~standard']
+  assert.equal(typeof schema?.validate, 'function', '必须导出 Config["~standard"].validate')
+  assert.equal(schema.version, 1)
+
+  // 空 / 缺省 -> 空配置
+  assert.deepEqual(schema.validate(undefined).value, {})
+  assert.deepEqual(schema.validate(null).value, {})
+  assert.deepEqual(schema.validate({}).value, {})
+
+  // 正常填写: 去空白, 只保留非空字段
+  assert.deepEqual(schema.validate({ fofa: ' K-FOFA ', shodan: '' }).value, { fofa: 'K-FOFA' })
+  assert.deepEqual(schema.validate({ fofa: 'K', shodan: 'S', hunter: 'H' }).value, {
+    fofa: 'K',
+    shodan: 'S',
+    hunter: 'H',
+  })
+
+  // timeoutSec 夹取到 5~300 秒
+  assert.equal(schema.validate({ timeoutSec: 1 }).value.timeoutSec, 5)
+  assert.equal(schema.validate({ timeoutSec: 9999 }).value.timeoutSec, 300)
+  assert.equal(schema.validate({ timeoutSec: 45 }).value.timeoutSec, 45)
+
+  // 非法输入 -> issues (会阻止插件挂载), 且绝不能返回 Promise
+  assert.ok(schema.validate('nope').issues)
+  assert.ok(schema.validate([]).issues)
+  assert.ok(schema.validate({ fofa: 123 }).issues, 'Key 必须是字符串')
+  assert.ok(schema.validate({ timeoutSec: -1 }).issues)
+  assert.equal('then' in schema.validate({}), false, 'validate 不能是异步的')
+})
+
+test('Config 生效: 设置页填的 Key 优先于凭证库, 空则回退', async () => {
+  const plugin = await loadLoaderPlugin()
+
+  // 凭证库里有 fofa, Config 也有 fofa -> Config 优先
+  const ctx = makeRealCtx({ credentials: makeCreds({ MAPSCAN_FOFA_API_KEY: 'FROM-STORE' }) })
+  await plugin.apply(ctx, { fofa: 'FROM-CONFIG' })
+  assert.equal(await resolveKey(ctx, 'fofa', undefined), 'FROM-CONFIG')
+
+  // Config 没填 shodan -> 回退凭证库
+  assert.equal(await resolveKey(ctx, 'shodan', undefined), undefined)
+
+  // 工具参数 key 仍最高优先
+  assert.equal(await resolveKey(ctx, 'fofa', 'EXPLICIT'), 'EXPLICIT')
+
+  // 未挂载 Config 时行为不变 (回退凭证库)
+  const bare = makeRealCtx({ credentials: makeCreds({ MAPSCAN_FOFA_API_KEY: 'FROM-STORE' }) })
+  await plugin.apply(bare)
+  assert.equal(await resolveKey(bare, 'fofa', undefined), 'FROM-STORE')
+})
+
+test('Config 生效: timeoutSec 传导到 shell 请求超时', async () => {
+  const plugin = await loadLoaderPlugin()
+  const calls = []
+  const shell = {
+    resolve(request) {
+      calls.push(request)
+      return {
+        command: request.command,
+        workdir: 'D:\\ws',
+        timeoutMs: request.timeoutMs ?? 120000,
+        onExpiry: 'kill',
+        stdoutMaxBytes: request.stdoutMaxBytes ?? 4194304,
+        sandboxPolicy: { mode: 'workspace-write', workspaceRoot: 'D:\\ws' },
+      }
+    },
+    async execute() {
+      throw new Error('short-circuit')
+    },
+  }
+  const ctx = {
+    tools: { register: () => () => {} },
+    effect: (fn) => fn(),
+    get: () => undefined,
+    shell,
+  }
+  await plugin.apply(ctx, { timeoutSec: 7 })
+
+  const { curlJson } = await import('../../src/lib/http.js')
+  await assert.rejects(curlJson(ctx, 'https://x.test/', {}), /short-circuit/)
+  assert.equal(calls[0].timeoutMs, (7 + 10) * 1000, 'Config.timeoutSec 应参与请求超时')
+
+  // 用户显式设定应覆盖平台适配器的默认调优 (平台传 45s, 配置却是 7s -> 用 7s)
+  await assert.rejects(curlJson(ctx, 'https://x.test/', { timeoutSec: 45 }), /short-circuit/)
+  assert.equal(calls[1].timeoutMs, (7 + 10) * 1000, 'Config 应优先于平台默认调优')
+
+  // 未配置 Config 时回落到平台默认
+  const bare = {
+    tools: { register: () => () => {} },
+    effect: (fn) => fn(),
+    get: () => undefined,
+    shell,
+  }
+  await plugin.apply(bare)
+  await assert.rejects(curlJson(bare, 'https://x.test/', { timeoutSec: 45 }), /short-circuit/)
+  assert.equal(calls[2].timeoutMs, (45 + 10) * 1000, '无 Config 时用平台默认')
+})
+
 test('bundle 契约: 声明 dsh.bundle.patch 且补丁文件存在并挂载本插件', async () => {
   // DSH 的插件清单只把声明了 dsh.bundle.patch 的包当作插件层; 缺了它就会出现
   // 「已安装但检测不到该插件」。这条断言锁死该契约, 防止回归。
@@ -108,6 +221,11 @@ test('bundle 契约: 声明 dsh.bundle.patch 且补丁文件存在并挂载本�
   assert.match(patch, /- insert:/)
   assert.match(patch, /id:\s*mapscan-dsh/)
   assert.match(patch, /name:\s*'?mapscan-dsh'?/)
+  // 该行必须带 config 块, 设置页的配置表单才有可编辑的落点
+  assert.match(patch, /config:/)
+  for (const platform of ['fofa', 'shodan', 'hunter', 'zoomeye', 'quake']) {
+    assert.match(patch, new RegExp(`^\\s+${platform}:`, 'm'), `config 应含 ${platform}`)
+  }
 
   // 版本兼容声明走 engines.dsh (DshEnginesManifest)
   assert.match(manifest.engines.dsh, /0\.1\.7-rc\.2/)

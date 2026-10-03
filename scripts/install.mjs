@@ -66,6 +66,10 @@ if (!bundles.includes(PKG)) {
   console.log(`✔ bundle 层已包含 ${PKG} (无需改动)`)
 }
 
+// ---- 2b. 确保 insert 行带 config 块: 设置页的配置表单需要可编辑的落点 ----
+// 已有配置一律保留 (绝不因安装而清空用户填过的 Key)
+ensureConfigBlock()
+
 // ---- 3. 清理旧版安装遗留的手工 insert 行 ----
 if (existsSync(patchPath)) {
   const before = readFileSync(patchPath, 'utf8')
@@ -88,6 +92,38 @@ function resolvePnpm() {
   const cli = join(deps, 'pnpm', 'bin', 'pnpm.mjs')
   if (existsSync(node) && existsSync(cli)) return { node, cli }
   return { node: process.execPath, cli: 'pnpm' }
+}
+
+/**
+ * 确保 profile 补丁层里 mapscan-dsh 的 insert 行带 `config:` 块。
+ *
+ * 意义: 设置页「插件 → MapScan」的表单需要一个可编辑的落点; 没有 config 块时
+ * 配置清单里该条目仍会被识别, 但表单无处回写。
+ * 安全性: 只在**该行确实没有 config** 时补一个空块; 已存在的配置原样保留,
+ * 避免安装脚本清空用户填过的 Key。行不存在则不动 (交给 bundle 补丁提供默认值)。
+ */
+function ensureConfigBlock() {
+  if (!existsSync(patchPath)) return
+  const text = readFileSync(patchPath, 'utf8')
+  const lines = text.split('\n')
+  const head = lines.findIndex((line) => /^\s*- id:\s*mapscan-dsh\s*$/.test(line))
+  if (head < 0) return // 行不在此文件 (由 bundle 补丁负责)
+  // 该行的字段范围: 到下一个同级 `- ` 条目或文件结尾
+  let end = lines.length
+  for (let i = head + 1; i < lines.length; i++) {
+    if (/^\s*- /.test(lines[i])) {
+      end = i
+      break
+    }
+  }
+  const block = lines.slice(head, end)
+  if (block.some((line) => /^\s*config:\s*$/.test(line))) return // 已有 config, 保留
+
+  const indent = (/^(\s*)/.exec(lines[head])?.[1] ?? '').length
+  const pad = ' '.repeat(indent + 2)
+  const inserted = [...lines.slice(0, end), `${pad}config: {}`, ...lines.slice(end)]
+  writeFileSync(patchPath, inserted.join('\n'), 'utf8')
+  console.log('✔ 已为该行补上空 config 块 (设置页配置表单的落点)')
 }
 
 /** 移除 `- insert:` 块中 id/mapscan 的旧行; 绝不触碰其它条目 (defensive-patterns) */
