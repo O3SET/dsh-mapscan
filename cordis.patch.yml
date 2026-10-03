@@ -1,0 +1,15 @@
+# MapScan DSH — bundle 层补丁
+#
+# 作用: 把本插件作为一行挂载进装配树, 使 `dsh plugin` / 插件市场 / 设置页插件清单
+# 能够把它识别为一个 bundle 并在重启后激活。
+#
+# 为什么必须有这个文件: DSH 的插件清单只把「声明了 `dsh.bundle.patch` 的包」当作插件层
+# (见 @deepseek-ai/dsh-package-manifest 的 DshManifest/DshBundleManifest)。
+# 只往 profile 的 cordis.patch.yml 手写 `insert:` 行虽然也能加载, 但插件清单读不到,
+# 表现就是「装了但检测不到该插件」。
+#
+# 补丁语义提醒: loader 的 config 是**整块替换、绝不深合并**, 所以这里只做 insert,
+# 不覆写任何既有条目的 config, 避免误删 base 层的配置。
+- insert:
+    - id: mapscan-dsh
+      name: 'mapscan-dsh'

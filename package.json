@@ -1,6 +1,6 @@
 {
   "name": "mapscan-dsh",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "DeepSeek Harness 动态 Cordis 插件：FOFA / Shodan / 鹰图Hunter / ZoomEye / Quake 网络空间测绘综合查询",
   "type": "module",
   "license": "MIT",
@@ -13,13 +13,18 @@
   },
   "homepage": "https://github.com/O3SET/dsh-mapscan#readme",
   "engines": {
-    "node": ">=22.19"
+    "node": ">=22.19",
+    "dsh": ">=0.1.7-rc.2"
   },
   "main": "./dist/mapscan-plugin.mjs",
   "exports": {
     ".": "./dist/mapscan-plugin.mjs"
   },
   "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "entry": "./dist/mapscan-host.js",
     "loader": "./dist/mapscan-plugin.mjs",
     "half": "host"
@@ -71,6 +76,7 @@
     "scripts",
     "docs",
     "examples",
+    "cordis.patch.yml",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"

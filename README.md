@@ -55,23 +55,38 @@ MapScan 把它们封装成 6 个统一的动态工具，输出**归一化结果*
 
 ## Install / Uninstall
 
-**✨ 一键安装（推荐，持久化）**
+MapScan 是一个 **DSH bundle 插件**：`package.json` 声明 `dsh.bundle.patch` → 根目录 [`cordis.patch.yml`](cordis.patch.yml)，
+补丁把 `mapscan-dsh` 作为一行挂载进装配树。这是被 `dsh plugin` / 插件市场 / 设置页插件清单识别的**唯一**声明方式。
+
+**✨ 方式一：插件市场 / 设置页安装（推荐）**
+
+设置 → 插件 → 安装，填入以下任一：
+
+```text
+O3SET/dsh-mapscan                                  # GitHub 仓库（topic: dsh-plugin）
+github:O3SET/dsh-mapscan                           # 显式 git 源
+file:D:/path/to/dsh-mapscan                        # 本地克隆（绝对路径）
+```
+
+**方式二：一键脚本（本地克隆，等价动作）**
 
 ```powershell
 git clone https://github.com/O3SET/dsh-mapscan.git
 node dsh-mapscan\scripts\install.mjs
-# 重启 DSH 进程（或等待长驻界面 HMR 自动重载）→ 6 个 map_* 工具全局可用
+# 重启 DSH 进程 → 6 个 map_* 工具全局可用
 ```
 
-`install.mjs` 只做两件事（**不依赖任何包管理器**）：在 DSH profile 工作区创建
-`node_modules/mapscan-dsh` 指向本仓库的链接（Windows junction 支持跨盘符），并向补丁层
-（`~/.dsh/profiles/<profile>/cordis.patch.yml`）登记 Loader 行 `name: mapscan-dsh` ——
-由 Cordis Loader 在启动时加载，插件清单中显示为 **mapscan-dsh**。
+`install.mjs` 做三件事，与插件市场的安装动作一致：
 
-- 非默认 profile：`$env:DSH_PROFILE="你的profile"; node scripts/install.mjs`
-- 卸载：`node scripts/uninstall.mjs`（移除补丁行与链接后重启）
-- 升级：`git pull` 后**无需任何操作**（链接指向仓库文件，重启即用新版；重新构建后见 Development）
-- 幂等：重复执行安全（自动替换旧行/旧链接）
+1. 在 profile 目录执行 `pnpm add link:<本仓库>`（`link:` 不复制 devDependencies，且**仓库改动即时生效**，升级无需重装）；
+2. 把 `mapscan-dsh` 追加进 profile `package.json` 的 `dsh.profile.bundles` 层列表；
+3. 清理 1.5.0 之前旧装法遗留的手工 `insert:` 行（避免重复注册）。
+
+- 非默认 profile：`$env:DSH_PROFILE="你的profile"; node scripts/install.mjs`（本仓库默认 `desktop`）
+- 卸载：`node scripts/uninstall.mjs`（移除 bundle 层登记 + pnpm 依赖后重启）
+- 幂等：重复执行安全
+- **排错**：装完在插件列表里看不到 → 确认 `package.json` 有 `dsh.bundle.patch` 且 `cordis.patch.yml` 随包发布；
+  旧版「junction + 手写补丁行」的装法**能被 loader 加载但插件清单读不到**，会表现为「已安装却检测不到」
 
 **开发/预览安装（动态插件，会话级，可选）**
 
@@ -82,7 +97,7 @@ cordis_define { kind: new, idPrefix: mscan, code: { host: <dist 内容> } }
 cordis_run   { pluginId: ..., packageId: ..., mode: run }
 ```
 
-动态插件与持久化插件共存时作用域版本优先；正式使用建议直接走一键安装。
+动态插件与持久化插件共存时作用域版本优先；正式使用建议走方式一或方式二。
 清除已存 Key：`map_set_keys { "remove": ["fofa","shodan","hunter","zoomeye","quake"] }`
 
 ## Quick start

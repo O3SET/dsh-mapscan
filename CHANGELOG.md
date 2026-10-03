@@ -5,6 +5,24 @@
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-10-04
+
+### Fixed
+
+- **插件在 DSH 插件列表/设置页中检测不到**。DSH 的插件清单只把**声明了 `dsh.bundle.patch` 的包**当作插件层（`@deepseek-ai/dsh-package-manifest` 的 `DshManifest` / `DshBundleManifest`）。1.5.0 及更早的装法是「在 profile 里手写 `cordis.patch.yml` 的 `insert:` 行」——loader 确实会加载它（工具因此可用），但插件清单读不到，表现就是「装了却检测不到该插件」。现补上 `dsh.bundle.patch` → `cordis.patch.yml`，与 `dsh-plugin-workspace-only`、`dsh-ambiguity-handling` 等可被识别的插件同构。
+
+### Added
+
+- `package.json`：`dsh.bundle.patch: ./cordis.patch.yml`、`dsh.manifestVersion: 1`、`engines.dsh: ">=0.1.7-rc.2"`；`cordis.patch.yml` 加入 `files` 白名单（否则装到 profile 后读不到补丁文件）。
+- 根目录 `cordis.patch.yml`：bundle 层补丁，仅做 `insert`（不覆写任何既有条目的 `config`，规避 loader「config 整块替换」语义误删 base 配置的风险）。
+
+### Changed
+
+- **`scripts/install.mjs` 重写为真正的 bundle 安装**，与插件市场/设置页的安装动作一致：`pnpm add link:<本仓库>` + 追加 `dsh.profile.bundles` 条目 + 清理旧版遗留的手工 `insert:` 行。用 `link:` 而非 `file:`：不把 devDependencies 复制进 profile，且仓库改动即时生效、升级无需重装。默认 profile 从 `web` 改为 `desktop`。
+- `scripts/uninstall.mjs` 与安装对称：移除 bundle 层条目、pnpm 依赖与旧版遗留补丁行。
+- README 安装章节重写：给出插件市场（`O3SET/dsh-mapscan` / `github:` / `file:`）与脚本两条路径，并记录「已安装却检测不到」的排错口径。
+- 新增 bundle 契约测试：断言 `dsh.bundle.patch` 已声明、补丁文件存在且随包发布、补丁内含 `insert` 行挂载本插件、`engines.dsh` 已声明。测试 86 → 87 例。
+
 ## [1.5.0] - 2026-10-04
 
 ### Fixed
