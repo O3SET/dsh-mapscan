@@ -4,8 +4,11 @@
 // 契约 (照 DSH 0.2.0-rc.2 的 client-modules):
 //   * 这是一个 **classic script** (由宿主 document.createElement('script') 加载), 不是 ESM;
 //     它只注册一个惰性 CJS 工厂, 模块 id 必须等于包名。
-//   * factory 返回 { inject, apply }; 可用 require() 取的只有宿主模块表里的种子模块
-//     (react / react-dom / @deepseek-ai/dsh-client-ui-slots 等), 不要 require 其它 Harness 包。
+//   * factory 返回 { inject, apply }; 可用 require() 取的**只有**宿主模块表里的种子模块
+//     (react / react/jsx-runtime / react-dom / react-dom/client / @deepseek-ai/cordis /
+//      dsh-client-store / dsh-client-ui-slots / dsh-client-ui-primitives / dsh-client-ui-dockkit)。
+//     require 任何表外模块都会抛 "missed the module table", 并让插件在客户端显示异常 ——
+//     所以这里只 require react, 其余 Harness 服务一律走 ctx。
 //
 // 为什么需要它: DSH 的插件配置表单**不会**自动生成 —— dsh-settings 只把
 // `volatile()` 字段投影进 settings.describe(), 而没有任何内置客户端消费 autoGenerate
@@ -19,7 +22,6 @@ window.__ModuleLoader__.load({
   id: 'mapscan-dsh',
   factory: (require) => {
     const React = require('react')
-    const slots = require('@deepseek-ai/dsh-client-ui-slots')
 
     /** 必须与 bundle 补丁里那一行的 id 一致 —— 它就是 settings 命名空间 */
     const NS = 'mapscan-dsh'
@@ -85,17 +87,20 @@ window.__ModuleLoader__.load({
         React.useCallback((notify) => form.subscribe(notify), [form]),
         React.useCallback(() => form.getSnapshot(), [form]),
       )
-      // secret 字段的值不回传, 只有存在性 sidecar
-      const presence = React.useSyncExternalStore(
+      // secret 字段的值不回传, 只有存在性 sidecar。
+      // 注意必须返回**稳定引用**(快照本身), 不能每次算一个新对象 ——
+      // useSyncExternalStore 会因引用变化而无限重渲染。
+      const described = React.useSyncExternalStore(
         React.useCallback((notify) => configFormsRef.describe().subscribe(notify), []),
-        React.useCallback(() => {
-          const rows = configFormsRef.describe().getSnapshot()?.view?.namespaces ?? []
-          const row = rows.find((candidate) => candidate.ns === NS)
-          const map = {}
-          for (const item of row?.secrets ?? []) map[item.path?.[0]] = item.set === true
-          return map
-        }, []),
+        React.useCallback(() => configFormsRef.describe().getSnapshot(), []),
       )
+      const presence = React.useMemo(() => {
+        const rows = described?.view?.namespaces ?? []
+        const row = rows.find((candidate) => candidate.ns === NS)
+        const map = {}
+        for (const item of row?.secrets ?? []) map[item.path?.[0]] = item.set === true
+        return map
+      }, [described])
 
       const [draft, setDraft] = React.useState({})
       const [status, setStatus] = React.useState('')
@@ -125,8 +130,9 @@ window.__ModuleLoader__.load({
           const ops = []
           for (const key of touched) {
             const raw = draft[key].trim()
-            // 清空 = unset, 恢复继承 (回退到凭证库 / 环境变量)
-            if (raw.length === 0) ops.push({ op: 'unset', path: [key] })
+            // 清空 = 写空串 (继承层为空串等价于「未配置」)。
+            // 刻意不用 unset: unset 在 base 提供标量时的语义未经验证, 而写空串是确定的行为。
+            if (raw.length === 0) ops.push({ op: 'set', path: [key], value: '' })
             else if (key === 'timeoutSec') ops.push({ op: 'set', path: [key], value: Number(raw) })
             else ops.push({ op: 'set', path: [key], value: raw })
           }
@@ -193,6 +199,8 @@ window.__ModuleLoader__.load({
     /** 由 apply 注入的 configForms; 组件通过它取表单 (避免每处都传 props) */
     let configFormsRef
 
+    // 'slots' 提供 ctx.slots (注册设置页); 'configForms' 提供读写本插件 config 的表单。
+    // 服务的写入走 provider 自己的 fiber, 因此这里无需注入 remote.settings。
     const inject = ['slots', 'configForms']
 
     function apply(ctx) {
@@ -213,9 +221,6 @@ window.__ModuleLoader__.load({
         'mapscan-dsh: settings section',
       )
     }
-
-    // 保持 slots 引用, 便于将来注册嵌套 slot; 同时避免未使用告警
-    void slots
 
     return { inject, apply }
   },

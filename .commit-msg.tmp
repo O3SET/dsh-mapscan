@@ -1,0 +1,13 @@
+fix(client): 移除未使用的表外 require, 避免客户端加载异常
+
+浏览器半侧此前 require('@deepseek-ai/dsh-client-ui-slots') 但实际并未使用
+(只留了一个 void slots 占位)。该模块名不在宿主 9 个基线模块表里, 也没有在
+dsh.client.external 中声明 —— 表外 require 会抛 "missed the module table",
+足以让插件在客户端显示异常。
+
+- 删除该 require 与 void 占位; 现在只 require('react') (位于基线表内),
+  其余 Harness 能力一律经 ctx 获取
+- useSyncExternalStore 的存在性快照改为订阅 describe() 的稳定快照 + useMemo
+  派生: 原实现每次渲染都返回新对象, 会导致无限重渲染
+- 清空字段改用 set('') 而非 unset: unset 在 base 提供标量时的语义未经验证,
+  写空串是确定行为 (继承层为空串等价于「未配置」)
