@@ -120,32 +120,53 @@ map_account   { "platform": "fofa" }
 
 ## Configuration
 
-**方式一：设置页表单（推荐，图形界面）**
+**方式一：配置文件 / 插件 Config（当前可用）**
 
-设置 → 插件 → **MapScan** 卡片 → 配置：直接填写五个平台的 Key 与超时。
+直接编辑 profile 里 `mapscan-dsh` 那一行的 `config:` 块，或让插件市场/插件管理把它写进去：
 
-该表单由插件的 `Config`（Standard Schema，见 [src/index.js](src/index.js)）驱动，值落在 profile 的
-`cordis.patch.yml` 中 `mapscan-dsh` 那一行的 `config:` 块里（见本仓库 [cordis.patch.yml](cordis.patch.yml)）。
+```yaml
+- insert:
+    - id: mapscan-dsh
+      name: 'mapscan-dsh'
+      config:
+        fofa: '你的 FOFA Key'
+        shodan: '你的 Shodan Key'
+        timeoutSec: 45
+```
 
-> 实现要点（供二次开发者参考，也是本插件踩过的坑）：
->
-> 1. DSH **不会**从插件 `Config` 自动生成表单——`autoGenerate` 目前没有任何客户端消费；
-> 2. `Config` 必须是 **schemastery** schema（`isNativeConfigSchema` 判定），否则配置 status 为 `unsupported`；
-> 3. 字段要出现在表单里且可写，必须加 **`.volatile()`**；API Key 另加 `.role('secret')`
->    （读取时值被抹掉，只回传 `{path,set}` 存在性，故表单显示「已配置（留空不改动）」）；
-> 4. 只有本机回环地址下才能持久化写入（非回环时服务降级为 memory 模式，写入不落盘）。
+`Config` 是 schemastery schema（见 [src/index.js](src/index.js)），插件挂载时由 Cordis 校验后注入 `apply`。
 
 **方式二：对话里配置 / 环境变量**
 
-| 配置项                                                                                              | 默认           | 说明                                    |
-| --------------------------------------------------------------------------------------------------- | -------------- | --------------------------------------- |
-| 设置页 `fofa` / `shodan` / `hunter` / `zoomeye` / `quake`                                           | 未配置         | 插件 Config，明文保存在 profile 配置里  |
-| 设置页 `timeoutSec`                                                                                 | 30             | 单请求超时（秒），夹取 5~300            |
-| `map_set_keys` 参数                                                                                 | 未配置         | 写入 DSH 凭证库（持久化，不落配置文件） |
-| 环境变量 `MAPSCAN_*_API_KEY`                                                                        | —              | 与凭证库同名引用，环境变量优先          |
-| 环境变量 `FOFA_API_KEY` / `SHODAN_API_KEY` / `HUNTER_API_KEY` / `ZOOMEYE_API_KEY` / `QUAKE_API_KEY` | —              | 社区惯用名，次优先                      |
-| 工具参数 `key`                                                                                      | —              | 单次调用临时覆盖，不落盘                |
-| `size`（每页条数）                                                                                  | 20（最大 100） | 各工具统一夹取                          |
+| 配置项                                                                                              | 默认   | 说明                                    |
+| --------------------------------------------------------------------------------------------------- | ------ | --------------------------------------- |
+| Config `fofa` / `shodan` / `hunter` / `zoomeye` / `quake`                                           | 未配置 | 插件 Config，明文保存在 profile 配置里  |
+| Config `timeoutSec`                                                                                 | 30     | 单请求超时（秒），夹取 5~300            |
+| `map_set_keys` 参数                                                                                 | 未配置 | 写入 DSH 凭证库（持久化，不落配置文件） |
+| 环境变量 `MAPSCAN_*_API_KEY`                                                                        | —      | 与凭证库同名引用，环境变量优先          |
+| 环境变量 `FOFA_API_KEY` / `SHODAN_API_KEY` / `HUNTER_API_KEY` / `ZOOMEYE_API_KEY` / `QUAKE_API_KEY` | —      | 社区惯用名，次优先                      |
+
+> **关于设置页图形表单（暂未启用）**
+>
+> 本仓库带有实验性的浏览器半侧 [src/client.js](src/client.js)（注册 `settings.section` 页面），
+> 但**尚未在真机验证通过**，且它的加载失败会让插件在客户端列表里显示异常，
+> 因此 `package.json` **刻意不声明** `dsh.client` / `exports["./client"]`，该产物不会被加载。
+>
+> 若要启用，需把它接回 `package.json` 的 `dsh.client`（`platform: 'web'`）与 `exports["./client"]`，
+> 并具备浏览器控制台以便调试。已确认的实现要点：
+>
+> 1. DSH **不会**从插件 `Config` 自动生成表单——`autoGenerate` 目前没有任何客户端消费
+>    （`dsh-settings` README: “no shipped client does so yet”）；
+> 2. `Config` 必须是 **schemastery** schema（`isNativeConfigSchema` 判定），否则配置 status 为 `unsupported`；
+> 3. 字段要在表单里可见且可写，必须加 **`.volatile()`**；API Key 另加 `.role('secret')`
+>    （读取时值被抹掉，只回传 `{path,set}` 存在性）；
+> 4. 写入只在**本机回环**地址下持久化；
+> 5. 客户端 bundle 是 classic script，模块 id 必须等于包名，且只能 `require` 宿主模块表里的
+>    `react` / `react-dom` / `@deepseek-ai/cordis` / `dsh-client-store` / `dsh-client-ui-slots` /
+>    `dsh-client-ui-primitives` / `dsh-client-ui-dockkit` —— 表外 `require` 会抛
+>    “missed the module table”。
+>    | 工具参数 `key` | — | 单次调用临时覆盖，不落盘 |
+>    | `size`（每页条数） | 20（最大 100） | 各工具统一夹取 |
 
 **Key 解析优先级**：工具参数 `key` > 插件 Config（设置页）> 环境变量 / 凭证库 > 社区惯用环境变量名。
 即**设置页填过的值会掩盖凭证库条目**；想回到凭证库，请把设置页对应字段清空。

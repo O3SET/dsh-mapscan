@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-10-04
+
+### Fixed
+
+- **插件在客户端列表里显示异常**：1.7.0 引入的浏览器半侧加载失败会把整个插件标红。由于该半侧无法在当前环境验证（拿不到浏览器控制台、不能启动浏览器），本次**解耦**：`package.json` 不再声明 `dsh.client` 与 `exports["./client"]`，客户端产物不再被加载，宿主侧插件与 6 个工具恢复为确定可用状态。
+
+### Changed
+
+- 实验性浏览器半侧保留在 [src/client.js](src/client.js)（构建仍产出 `dist/mapscan-client.js`），并在 README 记录启用步骤与已核实要点，待具备浏览器调试条件后再接回。
+- 配置方式回归「profile `config:` 块 / `map_set_keys` / 环境变量」三条确定可用的路径。
+- 修掉 1.7.0 客户端代码里的两处真实缺陷（即使当前未启用，也避免将来重蹈）：
+  - 删除了**未使用**的 `require('@deepseek-ai/dsh-client-ui-slots')` —— 该名不在宿主 9 个基线模块表内且未声明 `dsh.client.external`，表外 `require` 会抛 `missed the module table`；
+  - `useSyncExternalStore` 的「存在性」快照原为每次渲染新建对象（引用不稳定 → 无限重渲染），改为订阅 `describe()` 稳定快照 + `useMemo` 派生；
+  - 清空字段由 `unset` 改为 `set('')`（`unset` 在继承标量时的语义未经验证）。
+
 ## [1.7.0] - 2026-10-04
 
 ### Fixed
