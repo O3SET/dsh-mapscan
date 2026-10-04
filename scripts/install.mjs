@@ -27,6 +27,8 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const PKG = 'mapscan-dsh'
+/** 插件 Config 需要的 schemastery; 见下方 1b 的说明 */
+const SCHEMASTERY = '@deepseek-ai/schemastery'
 const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh')
 const PROFILE = process.env.DSH_PROFILE || 'desktop'
 const profileDir = join(DSH_HOME, 'profiles', PROFILE)
@@ -51,6 +53,20 @@ try {
   console.error(`✗ pnpm add 失败: ${error.message}`)
   console.error('  可改用图形界面: 设置 → 插件 → 安装, 填本仓库绝对路径或 GitHub 地址。')
   process.exit(1)
+}
+
+// ---- 1b. 确保 profile 能解析 @deepseek-ai/schemastery ----
+// 插件以 `link:` 安装时, Node 会把符号链接解析到**仓库真实路径**再向上找 node_modules,
+// 因此仓库目录下必须能解析到 schemastery —— 干净克隆没有 node_modules, 会 ERR_MODULE_NOT_FOUND
+// 而让插件挂载失败 (fiberPhase: failed)。这里在 profile 顶层装一份兜底。
+try {
+  execFileSync(pnpm.node, [pnpm.cli, 'add', `${SCHEMASTERY}@^3.18.4`, '--dir', profileDir], {
+    stdio: 'inherit',
+  })
+} catch (error) {
+  console.warn(`· 安装 ${SCHEMASTERY} 失败: ${error.message}`)
+  console.warn(`  插件依赖它提供配置 schema; 缺失时插件会挂载失败。`)
+  console.warn(`  手动修复: cd ${profileDir} && pnpm add ${SCHEMASTERY}`)
 }
 
 // ---- 2. 追加 bundle 层 (幂等) ----

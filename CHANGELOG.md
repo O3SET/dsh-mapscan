@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-10-04
+
+### Fixed
+
+- **插件挂载失败（`fiberPhase: "failed"`，界面上标红）**。根因：1.7.0 起 `Config` 需要 `@deepseek-ai/schemastery` 提供配置 schema，而插件以 `link:`/junction 方式安装时，**Node 会把符号链接解析到仓库真实路径再向上找 `node_modules`** —— 干净克隆下仓库目录没有 `node_modules`，`@deepseek-ai/schemastery` 解析失败抛 `ERR_MODULE_NOT_FOUND`，整个插件挂载失败。
+  - 我的本地测试之所以全绿，是因为仓库根有 `npm install` 生成的 `node_modules`（含 schemastery），**恰好掩盖了真实安装场景**。
+  - 修复：`scripts/install.mjs` 现在除安装插件本体外，还会在 profile 顶层 `pnpm add @deepseek-ai/schemastery`，保证解析链上一定有它；手动重装一次脚本即恢复。
+- 记录排查结论：本机 profile 里 13 个断链（`dsh-client-web`、`cordis-plugin-hmr`、`dsh-config-editor` 等）**没有任何在装包声明依赖**，属 npx 缓存清理后的孤立残留，不影响启动；控制台里的 `/plugins/events` `ERR_FAILED` 与 `/api/changes.summary` 404 是该装配下的既有现象，与 MapScan 无关。
+
 ## [1.7.1] - 2026-10-04
 
 ### Fixed
