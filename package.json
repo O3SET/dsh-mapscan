@@ -30,7 +30,7 @@
     "half": "host"
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.4"
+    "@deepseek-ai/schemastery": "^3.18.5"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
